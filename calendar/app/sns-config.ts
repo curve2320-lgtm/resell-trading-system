@@ -4,7 +4,7 @@ export type SnsAccount = {
   label: string;
 };
 
-export const officialSnsAccounts = [
+const legacyManualSnsAccounts = [
   { platform: "instagram", handle: "nike", label: "Nike" },
   { platform: "instagram", handle: "adidas", label: "adidas" },
   { platform: "instagram", handle: "newbalance", label: "New Balance" },
@@ -21,6 +21,13 @@ export const officialSnsAccounts = [
   { platform: "instagram", handle: "palaceskateboards", label: "PALACE" },
 ] as const satisfies readonly SnsAccount[];
 
+// Keep previously trusted manual intake accounts. Automatic provenance is
+// checked separately against the current website-verified Instagram catalog.
+export const officialSnsAccounts: readonly SnsAccount[] = [
+  ...officialInstagramAccounts.map(({handle,label})=>({platform:"instagram" as const,handle,label})),
+  ...legacyManualSnsAccounts.filter(({handle})=>!officialInstagramAccounts.some((account)=>account.handle===handle)),
+];
+
 export function isOfficialSnsHandle(handle: string): boolean {
   const normalized = handle.trim().replace(/^@/, "").toLowerCase();
   return officialSnsAccounts.some((account) => account.handle === normalized);
@@ -34,3 +41,4 @@ export function snsAccountLabel(handle: string): string {
   );
 }
 
+import { officialInstagramAccounts } from "./instagram-accounts.ts";

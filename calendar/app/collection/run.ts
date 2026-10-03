@@ -50,6 +50,7 @@ type RunSourceCollectionInput = RunCollectionInput & {
 
 export const SOURCE_REFRESH_CLAIM_TTL_MS = 90_000;
 export const SOURCE_REFRESH_ADAPTER_DEADLINE_MS = 20_000;
+const seoulDayFormatter = new Intl.DateTimeFormat("en-CA", {timeZone:"Asia/Seoul",year:"numeric",month:"2-digit",day:"2-digit"});
 
 export type ScheduledSourceCollectionInput = {
   repository: CollectionRepository;
@@ -257,7 +258,27 @@ function randomUUID(source?: () => string): string {
 async function runClaimedCollection(
   input: RunCollectionInput,
   slotKey: string,
-  options: { claimTtlMs?: number; adapterDeadlineMs?: number } = {},
+  options: { claimTtlMs?: number; adapterDeadlineMs?: number; retryFailedAfterMs?: number } = {},
+): Promise<CollectionAttemptOutcome> {
+  const locks: Array<{sourceKey:string;token:string}> = [];
+  const scopedSources=[...new Set(input.adapters.filter(adapter=>adapter.key === "sibna" || adapter.collectionKey).map(({key})=>key))];
+  try {
+    if (input.repository.claimSourceRefreshLock) for (const sourceKey of scopedSources) {
+      const token=randomUUID(input.randomUUID);
+      const claimed=await input.repository.claimSourceRefreshLock(sourceKey,input.now.toISOString(),token,new Date(input.now.getTime()-(options.claimTtlMs ?? 15*60_000)).toISOString());
+      if (!claimed) return {state:"in_progress",summary:emptySummary(slotKey)};
+      locks.push({sourceKey,token});
+    }
+    return await runUnlockedClaimedCollection(input,slotKey,options);
+  } finally {
+    if (input.repository.releaseSourceRefreshLock) for (const {sourceKey,token} of locks.reverse()) await input.repository.releaseSourceRefreshLock(sourceKey,token);
+  }
+}
+
+async function runUnlockedClaimedCollection(
+  input: RunCollectionInput,
+  slotKey: string,
+  options: { claimTtlMs?: number; adapterDeadlineMs?: number; retryFailedAfterMs?: number },
 ): Promise<CollectionAttemptOutcome> {
   const collectedAt = input.now.toISOString();
   const claimToken = randomUUID(input.randomUUID);
@@ -269,6 +290,7 @@ async function runClaimedCollection(
     collectedAt,
     claimToken,
     staleBefore,
+    options.retryFailedAfterMs === undefined ? undefined : new Date(input.now.getTime()-options.retryFailedAfterMs).toISOString(),
   );
   if (claim.state !== "claimed") {
     return {
@@ -362,10 +384,16 @@ async function collectBeforeDeadline(
   }
 }
 
-export function sourceRefreshSlotKey(sourceKey: string, now: Date): string {
+export function sourceRefreshSlotKey(sourceKey: string, now: Date, metadata: Pick<ReleaseSourceAdapter,"collectionKey"|"refreshInterval"> = {}): string {
   // Retry a corrected parser within the current slot without rerunning other sources.
-  const revision = sourceKey === "shoeprize" ? "v4" : "v2";
-  return `refresh:${revision}:${collectionSlotKey(now)}:${sourceKey}`;
+  const revision = sourceKey === "shoeprize" ? "v4" : sourceKey === "sibna" || sourceKey === "sns" || sourceKey === "instagramPublic" ? "v3" : "v2";
+  let period = collectionSlotKey(now);
+  if (metadata.refreshInterval === "weekly") {
+    const seoulDay = new Date(`${seoulDayFormatter.format(now)}T00:00:00Z`);
+    seoulDay.setUTCDate(seoulDay.getUTCDate() - (seoulDay.getUTCDay() + 6) % 7);
+    period = `week:${seoulDay.toISOString().slice(0,10)}`;
+  }
+  return `refresh:${revision}:${period}:${metadata.collectionKey ?? sourceKey}`;
 }
 
 export async function runScheduledSourceCollection(
@@ -373,8 +401,8 @@ export async function runScheduledSourceCollection(
 ): Promise<CollectionAttemptOutcome> {
   return runClaimedCollection(
     {repository:input.repository,adapters:[input.adapter],now:input.now,randomUUID:input.randomUUID},
-    sourceRefreshSlotKey(input.adapter.key,input.now),
-    {claimTtlMs:SOURCE_REFRESH_CLAIM_TTL_MS,adapterDeadlineMs:input.adapterDeadlineMs ?? SOURCE_REFRESH_ADAPTER_DEADLINE_MS},
+    sourceRefreshSlotKey(input.adapter.key,input.now,input.adapter),
+    {claimTtlMs:SOURCE_REFRESH_CLAIM_TTL_MS,adapterDeadlineMs:input.adapterDeadlineMs ?? SOURCE_REFRESH_ADAPTER_DEADLINE_MS,retryFailedAfterMs:input.adapter.refreshInterval === "weekly" ? 5*60_000 : undefined},
   );
 }
 

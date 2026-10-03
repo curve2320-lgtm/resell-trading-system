@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createSibnaAdapter,
+  createSibnaCalendarAdapter,
+  isSibnaCalendarMonth,
   parseSibnaCalendar,
   parseSibnaRss,
+  sibnaCalendarWindow,
 } from "../app/collection/sibna-adapter.ts";
 
 const now = new Date("2026-10-04T02:00:00Z");
@@ -159,4 +162,63 @@ test("only explicit title locations set SIBNA market metadata and keep the suppl
     ["일본·한국","korea"],["한국","korea"],[undefined,undefined],["중국","overseas"],[undefined,undefined],[undefined,undefined],
   ]);
   assert.equal(parsed.releases.every(release=>release.releaseTime==="23:59"),true);
+});
+
+test("calendar history covers twelve prior and twelve following Seoul months with nearby months first", () => {
+  const months=sibnaCalendarWindow(now);
+  assert.equal(months.length,25);
+  assert.deepEqual(months.slice(0,7),["2026-10","2026-09","2026-11","2026-08","2026-12","2026-07","2027-01"]);
+  assert.equal(months.includes("2025-10"),true);
+  assert.equal(months.includes("2027-10"),true);
+  assert.equal(new Set(months).size,months.length);
+  assert.equal(sibnaCalendarWindow(new Date("2026-12-31T16:00:00Z"),1,1)[0],"2027-01");
+});
+
+test("on-demand calendar months accept only real months within the provider's public navigation range", () => {
+  assert.equal(isSibnaCalendarMonth("2021-01"),true);
+  assert.equal(isSibnaCalendarMonth("2028-12"),true);
+  for(const month of ["2020-12","2029-01","2026-13","2026-00","2026-1","2026-10&private=1","http://evil.test"])
+    assert.equal(isSibnaCalendarMonth(month),false);
+  assert.deepEqual(sibnaCalendarWindow(new Date("2021-01-01T00:00:00Z"),12,1),["2021-01","2021-02"]);
+  assert.throws(()=>sibnaCalendarWindow(now,-1,1),/month|range/i);
+  assert.throws(()=>sibnaCalendarWindow(now,13.5,1),/month|range/i);
+});
+
+test("a historical calendar job preserves the canonical source but claims a separate month and fetches only that month", async () => {
+  const urls:string[]=[];
+  const adapter=createSibnaCalendarAdapter("2026-09",async(url)=>{urls.push(url);return calendar({"2026-09-13":{items:[row(1791,"나이키 한정 신발","10:00")]}});});
+  assert.equal(adapter.key,"sibna");
+  assert.equal(adapter.collectionKey,"sibna:calendar:2026-09");
+  const result=await adapter.collect(now);
+  assert.deepEqual(urls,["https://sibna.kr/today/upcoming?month=2026-09"]);
+  assert.equal(result.sourceKey,"sibna");
+  assert.equal(result.releases[0].releaseDate,"2026-09-13");
+  assert.equal(result.releases[0].sourceKey,"sibna");
+  assert.equal(result.authoritativeSnapshot,false);
+  assert.equal(result.confirmedEmpty,false);
+  assert.match(result.message,/2026-09/);
+});
+
+test("an empty historical calendar is a valid bounded job and cannot erase other cached months", async () => {
+  const result=await createSibnaCalendarAdapter("2025-10",async()=>calendar({"2025-10-01":{items:[]}})).collect(now);
+  assert.equal(result.status,"connected");
+  assert.deepEqual(result.releases,[]);
+  assert.equal(result.authoritativeSnapshot,false);
+  assert.equal(result.confirmedEmpty,false);
+  assert.throws(()=>createSibnaCalendarAdapter("2026-13"),/month|range/i);
+  const failed=await createSibnaCalendarAdapter("2026-09",async()=>"<title>Just a moment</title>").collect(now);
+  assert.equal(failed.status,"error");
+});
+
+test("historical calendar food, tickets, financial news, generic sales and telecom promotions do not become releases", () => {
+  const titles=["DAY6 5TH FANMEETING","2026 김무열 팬미팅","스페이스엑스 상장","2026 대형한류 종합행사 : 함안 낙화 페스티벌","자라 세일","마리떼 프랑소와져버 세일","웍스아웃 SS 시즌오프 세일(매장)","팔라스 26ss 시즌 세일 영국/유럽","나이키 아울렛 세일 전제품 2개이상 구매시 20% 추가할인","제주항공 국제선 특가","맘스터치X귀멸의 칼날: 무한성편 콜라보 세트","농심 삼계탕 사발면 85g 6개입 쿠팡 사전예약","쿼터파운더 치즈+불고기 버거=6,000원","세이코 시계 가격인상","닌텐도 스위치2 가격인상","뮤지컬 [드림하이 시즌3 : 리부트]","2026-27 로이킴 LIVE TOUR (선예매)","포켓몬고 잉어킹 x SK텔레콤 2차 프로모션 (9월 16일 마감)","LG유플러스 선호번호 신청 이벤트 (골드번호 추첨응모)","eql 창고세일"];
+  const parsed=parseSibnaCalendar(calendar({"2026-09-01":{items:titles.map((title,index)=>row(index+1,title,"10:00"))}}),now);
+  assert.deepEqual(parsed.releases,[]);
+  assert.equal(parsed.filtered,titles.length);
+});
+
+test("product collaborations, merchandise, preorder goods and the Sail color survive historical noise rules", () => {
+  const titles=["킨 × 후지 록 페스티벌 컬레버레이션","나이키 문 슈 OG SP 세일 앤 클로러필","나이키 에어 포스 1 세일","닌텐도 스위치2 가격인상 후 첫발매","DAY6 팬미팅 한정 키링 굿즈","빅뱅 2026-2027 월드투어 공식 서울 팝업","예약판매 망그러진 곰x두산베어스","Apple Watch Ultra 4 사전예약","팬텀 6 로우 엘리트 FG x Cactus Jack","BLACKPINK X TAMAGOTCHI"];
+  const parsed=parseSibnaCalendar(calendar({"2026-09-01":{items:titles.map((title,index)=>row(index+1,title,"10:00"))}}),now);
+  assert.deepEqual(parsed.releases.map(release=>release.title),titles);
 });

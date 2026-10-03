@@ -14,7 +14,7 @@ const AGGREGATOR_SOURCES = new Set([
 ]);
 
 export function sourceTier(sourceKey: string): SourceTier {
-  if (sourceKey === "sns") return "announcement";
+  if (sourceKey === "sns" || sourceKey === "instagramPublic") return "announcement";
   if (expandedSourceCatalog.some((source) => source.key === sourceKey && source.parser === "atom")) return "announcement";
   if (AGGREGATOR_SOURCES.has(sourceKey)) return "aggregator";
   return "first_party";

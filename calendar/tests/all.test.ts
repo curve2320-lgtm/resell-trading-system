@@ -22,6 +22,7 @@ import "./expanded-source-adapters.test.ts";
 import "./sibna-adapter.test.ts";
 import "./collection-concurrency.test.ts";
 import "./instagram-adapter.test.ts";
+import "./instagram-widget-adapter.test.ts";
 import "./release-calendar-export.test.ts";
 import "./lifestyle-adapters.test.ts";
 import "./overseas-identity.test.ts";

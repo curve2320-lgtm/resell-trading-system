@@ -11,6 +11,7 @@ export type ReleaseFeedPayload<TRelease, TSourceHealth> = {
 };
 
 type LoaderOptions<TRelease, TSourceHealth> = {
+  month?: string;
   request: (url: string, init?: RequestInit) => Promise<Response>;
   onResponse: (payload: ReleaseFeedPayload<TRelease, TSourceHealth>) => void;
   onError: (error: unknown) => void;
@@ -77,7 +78,8 @@ export function createReleaseFeedLoader<TRelease = unknown, TSourceHealth = unkn
     try {
       const response = await Promise.race([
         (async () => {
-          const result = await request("/api/releases", { signal, cache: "no-store" });
+          const url = options.month && /^\d{4}-\d{2}$/.test(options.month) ? `/api/releases?month=${options.month}` : "/api/releases";
+          const result = await request(url, { signal, cache: "no-store" });
           if (!result.ok && result.status !== 503) throw new Error("Release request failed");
           const payload = parsePayload<TRelease, TSourceHealth>(await result.json());
           if (!result.ok && !(payload.collection.status === "failed" && payload.collection.pendingSources === 0)) {

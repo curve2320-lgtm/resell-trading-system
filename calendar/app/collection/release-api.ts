@@ -3,7 +3,7 @@ import {
   readReleaseApiPayload,
   type ReleaseApiPayload,
 } from "./repository.ts";
-import { configuredReleaseSourceKeys, enabledReleaseSourceAdapters } from "./registry.ts";
+import { configuredReleaseSourceKeys, scheduledReleaseSourceAdapters } from "./registry.ts";
 import { startReleaseRefreshBatch, type ReleaseRefreshContext } from "./refresh.ts";
 import {
   type CollectionAttemptOutcome,
@@ -160,13 +160,14 @@ export function createCachedReleaseGetHandler(
   };
 }
 
-export async function releaseGetResponse(): Promise<Response> {
+export async function releaseGetResponse(requestedMonth?: string): Promise<Response> {
   const sourceKeys = configuredReleaseSourceKeys();
   const repository = createCollectionRepository();
+  const now = new Date();
   const { waitUntil } = await import("cloudflare:workers");
   return createCachedReleaseGetHandler({
     startRefresh: () => startReleaseRefreshBatch({
-      repository, adapters: enabledReleaseSourceAdapters(), now: new Date(), waitUntil,
+      repository, adapters: scheduledReleaseSourceAdapters(now,requestedMonth), now, waitUntil,
     }),
     readReleaseApiPayload: () => readReleaseApiPayload(repository, sourceKeys),
     configuredSourceKeys: sourceKeys,

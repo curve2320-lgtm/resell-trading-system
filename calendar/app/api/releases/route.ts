@@ -13,8 +13,8 @@ function errorMessage(error: unknown) {
   return message;
 }
 
-export async function GET() {
-  return releaseGetResponse();
+export async function GET(request: Request) {
+  return releaseGetResponse(new URL(request.url).searchParams.get("month") ?? undefined);
 }
 
 export async function POST(request: Request) {

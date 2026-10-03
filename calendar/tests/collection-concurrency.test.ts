@@ -34,7 +34,7 @@ test("parallel article fanout shares the eight-request fetch budget",async(t)=>{
 
 test("text, JSON, Starbucks POST and Instagram all share the request budget",async(t)=>{
   let active=0,peak=0;
-  t.mock.method(globalThis,"fetch",async()=>{active++;peak=Math.max(peak,active);await new Promise((r)=>setTimeout(r,5));active--;return Response.json({list:[],business_discovery:{media:{data:[]}}});});
+  t.mock.method(globalThis,"fetch",async()=>{active++;peak=Math.max(peak,active);await new Promise((r)=>setTimeout(r,5));active--;return Response.json({list:[],business_discovery:{username:"stussy",media:{data:[]}}});});
   const starbucks=createExpandedAdapter(expandedSourceCatalog.find((s)=>s.key==="starbucks")!);
   const instagram=createInstagramAdapter(async()=>({INSTAGRAM_ACCESS_TOKEN:"test-token",INSTAGRAM_BUSINESS_ACCOUNT_ID:"123",INSTAGRAM_GRAPH_VERSION:"v25.0",INSTAGRAM_SOURCE_HANDLES:"stussy"}),globalThis.fetch);
   const values=await Promise.all([

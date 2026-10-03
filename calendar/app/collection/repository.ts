@@ -38,7 +38,7 @@ import type {
   ReleaseKind,
   ReviewReason,
 } from "./types.ts";
-import { safeAnnouncementUrl } from "../sns-links.ts";
+import { safeAnnouncementUrl, isInstagramSource } from "../sns-links.ts";
 import { safeRetailerUrl } from "../release-links.ts";
 import { expandedSourceCatalog, expandedSourceRegion } from "../expanded-sources.ts";
 
@@ -55,12 +55,15 @@ export type CollectionSlotSnapshot = {
 };
 
 export interface CollectionRepository {
+  claimSourceRefreshLock?(sourceKey: string, startedAt: string, claimToken: string, staleBefore: string): Promise<boolean>;
+  releaseSourceRefreshLock?(sourceKey: string, claimToken: string): Promise<void>;
   listCollectionSlots?(slotKeys: readonly string[]): Promise<CollectionSlotSnapshot[]>;
   claimSlot(
     slotKey: string,
     startedAt: string,
     claimToken: string,
     staleBefore: string,
+    retryFailedBefore?: string,
   ): Promise<SlotClaimOutcome>;
   completeSlot(
     slotKey: string,
@@ -465,6 +468,7 @@ const SOURCE_URLS: Record<string, string> = {
   asics: "https://www.asics.co.kr/board/?id=spscalendar",
   tune: "https://tune.kr",
   sns: "https://www.instagram.com/",
+  instagramPublic: "https://store.linefriends.com/",
   ...Object.fromEntries(expandedSourceCatalog.map(({ key, url }) => [key, url])),
 };
 
@@ -501,7 +505,7 @@ function hasMultiRetailerConfirmation(release: CachedRelease): boolean {
   const listings = new Set(
     release.channels.map(
       ({ sourceKey, retailer }) =>
-        sourceKey === "sns"
+        isInstagramSource(sourceKey)
           ? null
           : `${sourceKey.trim().toLowerCase()}\0${retailer.trim().toLowerCase()}`,
     ),
@@ -533,7 +537,7 @@ function releaseApiRelease(release: CachedRelease): ReleaseApiRelease {
       retailer: item.retailer,
       productUrl: safeRetailerUrl(item.productUrl),
       sourceUrl:
-        item.sourceKey === "sns"
+        isInstagramSource(item.sourceKey)
           ? safeAnnouncementUrl(item.sourceUrl)
           : safeRetailerUrl(item.sourceUrl),
       priceLabel: item.priceLabel,
@@ -543,7 +547,7 @@ function releaseApiRelease(release: CachedRelease): ReleaseApiRelease {
     channel: channel?.retailer ?? "",
     sourceName: channel?.sourceKey ?? "",
     sourceUrl:
-      channel?.sourceKey === "sns"
+      isInstagramSource(channel?.sourceKey)
         ? safeAnnouncementUrl(channel.sourceUrl)
         : safeRetailerUrl(channel?.sourceUrl),
     status: "예정",
@@ -595,7 +599,7 @@ function pendingUndatedItem(review: ReviewItem): ReleaseApiUndatedItem | null {
     return {
       id: candidate.externalId,
       title: candidate.title,
-      sourceUrl: review.sourceKey === "sns"
+      sourceUrl: isInstagramSource(review.sourceKey)
         ? safeAnnouncementUrl(candidate.sourceUrl)
         : safeRetailerUrl(candidate.sourceUrl),
       note: "발매일 확인 필요",
@@ -652,7 +656,7 @@ export async function readReleaseApiPayload(
     const health = healthBySource.get(sourceKey);
     sources[sourceKey] = {
       status: health?.status ?? "unknown",
-      count: health?.sourceCount ?? 0,
+      count: sourceKey === "sibna" ? new Set(cachedReleases.flatMap(({channels})=>channels.filter(channel=>channel.sourceKey === sourceKey).map(channel=>channel.externalId ?? channel.sourceUrl))).size : health?.sourceCount ?? 0,
       message: health?.message ?? "Collection has not run yet.",
       sourceUrl: SOURCE_URLS[sourceKey],
       ...(sourceKey === "nike" || undatedBySource.has(sourceKey)
@@ -1481,6 +1485,18 @@ function currentSlotOutcome(
 
 function createRepository(provider: CollectionDbProvider): CollectionRepository {
   return {
+    async claimSourceRefreshLock(sourceKey,startedAt,claimToken,staleBefore) {
+      const db=await provider();
+      const slotKey=`source-lock:${sourceKey}`;
+      const row=await db.insert(collectionSlots).values({slotKey,status:"running",startedAt,completedAt:null,claimToken})
+        .onConflictDoUpdate({target:collectionSlots.slotKey,set:{status:"running",startedAt,completedAt:null,claimToken},where:lte(collectionSlots.startedAt,staleBefore)})
+        .returning({claimToken:collectionSlots.claimToken}).get();
+      return row?.claimToken === claimToken;
+    },
+    async releaseSourceRefreshLock(sourceKey,claimToken) {
+      const db=await provider();
+      await db.delete(collectionSlots).where(and(eq(collectionSlots.slotKey,`source-lock:${sourceKey}`),eq(collectionSlots.claimToken,claimToken)));
+    },
     async listCollectionSlots(slotKeys) {
       if (slotKeys.length === 0) return [];
       const db = await provider();
@@ -1494,7 +1510,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
       }
       return result;
     },
-    async claimSlot(slotKey, startedAt, claimToken, staleBefore) {
+    async claimSlot(slotKey, startedAt, claimToken, staleBefore, retryFailedBefore) {
       const db = await provider();
       const claimed = await db
         .insert(collectionSlots)
@@ -1521,25 +1537,26 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
         .from(collectionSlots)
         .where(eq(collectionSlots.slotKey, slotKey))
         .get();
-      if (!existing || existing.status !== "running") {
+      const retryFailed=existing?.status === "failed" && retryFailedBefore !== undefined && existing.startedAt <= retryFailedBefore;
+      if (!existing || (existing.status !== "running" && !retryFailed)) {
         return currentSlotOutcome(existing);
       }
-      if (existing.startedAt > staleBefore) {
+      if (!retryFailed && existing.startedAt > staleBefore) {
         return { state: "in_progress" };
       }
 
       const reclaimed = await db
         .update(collectionSlots)
-        .set({ startedAt, completedAt: null, claimToken })
+        .set({ startedAt, completedAt: null, claimToken, status:"running" })
         .where(
           and(
             eq(collectionSlots.slotKey, slotKey),
-            eq(collectionSlots.status, "running"),
+            eq(collectionSlots.status, retryFailed ? "failed" : "running"),
             eq(collectionSlots.startedAt, existing.startedAt),
             existing.claimToken === null
               ? isNull(collectionSlots.claimToken)
               : eq(collectionSlots.claimToken, existing.claimToken),
-            lte(collectionSlots.startedAt, staleBefore),
+            lte(collectionSlots.startedAt, retryFailed ? retryFailedBefore! : staleBefore),
           ),
         )
         .returning({ slotKey: collectionSlots.slotKey })

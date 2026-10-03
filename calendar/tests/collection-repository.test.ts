@@ -55,6 +55,50 @@ const baseRelease: CollectedRelease = {
   collectedAt,
 };
 
+test("source refresh leases serialize different month jobs and release only their own token", async () => {
+  const repository=productionRepository(new SQLiteD1());
+  assert.equal(await repository.claimSourceRefreshLock!("sibna",t0,"first",collectedAt),true);
+  assert.equal(await repository.claimSourceRefreshLock!("sibna",t1,"second",collectedAt),false);
+  await repository.releaseSourceRefreshLock!("sibna","second");
+  assert.equal(await repository.claimSourceRefreshLock!("sibna",t1,"third",collectedAt),false);
+  await repository.releaseSourceRefreshLock!("sibna","first");
+  assert.equal(await repository.claimSourceRefreshLock!("sibna",t1,"second",collectedAt),true);
+  assert.equal(await repository.claimSourceRefreshLock!("sibna",t5,"recovered",t1),true);
+  await repository.releaseSourceRefreshLock!("sibna","second");
+  assert.equal(await repository.claimSourceRefreshLock!("sibna",t5,"fourth",t1),false);
+});
+
+test("an empty historic month keeps cached SIBNA schedules and aggregate source count", async () => {
+  const repository=productionRepository(new SQLiteD1());
+  const release={...baseRelease,sourceKey:"sibna",externalId:"sibna:1234"};
+  await repository.persistSourceResult(sourceResult({sourceKey:"sibna",groups:[releaseGroup(release)],authoritativeSnapshot:false}));
+  await repository.persistSourceResult(sourceResult({sourceKey:"sibna",groups:[],collectedAt:t1,confirmedEmpty:true,authoritativeSnapshot:false}));
+  const data=await readReleaseApiPayload(repository,["sibna"]);
+  assert.equal(data.sources.sibna.count,1);assert.equal(data.releases.length,1);
+});
+
+test("failed backfill can retry after its cooldown without changing ordinary terminal slots", async () => {
+  const repository=productionRepository(new SQLiteD1());
+  await repository.claimSlot("month",t0,"first",collectedAt);
+  await repository.failSlot("month","first",t1);
+  assert.deepEqual(await repository.claimSlot("month",t1,"early",collectedAt,collectedAt),{state:"failed"});
+  const retry=await repository.claimSlot("month",t5,"retry",t1,t0);
+  assert.equal(retry.state,"claimed");
+  assert.equal(await repository.completeSlot("month","first",t5),false);
+  assert.equal(await repository.completeSlot("month","retry",t5),true);
+  assert.deepEqual(await repository.claimSlot("month",t15,"next",t5,t5),{state:"completed"});
+});
+
+test("official public Instagram posts keep safe original permalinks in the published API", async () => {
+  const repository=productionRepository(new SQLiteD1());
+  const url="https://www.instagram.com/p/Dd7JK1hAVBr/";
+  const release={...baseRelease,sourceKey:"instagramPublic",externalId:"instagram:linefriends_us:actual",productUrl:url,sourceUrl:url};
+  await repository.persistSourceResult(sourceResult({sourceKey:"instagramPublic",groups:[releaseGroup(release)],authoritativeSnapshot:false}));
+  const data=await readReleaseApiPayload(repository,["instagramPublic"]);
+  assert.equal(data.releases[0].sourceUrl,url);assert.equal(data.releases[0].channels[0].sourceUrl,url);
+  assert.equal(data.sources.instagramPublic.sourceUrl,"https://store.linefriends.com/");
+});
+
 test("cached collection preserves a raffle's closing time, original SKU and overseas scope", async () => {
   const repository = productionRepository(new SQLiteD1());
   const release = {...baseRelease, startAt:"2026-07-31T10:00:00+09:00", endAt:"2026-08-01T18:00:00+09:00", region:"일본", marketScope:"overseas" as const};
@@ -1455,7 +1499,7 @@ test("a reclaim loses CAS when ownership changes at the observed start time", as
     if (
       ownershipChanged ||
       !statement.sql.includes(
-        'update "collection_slots" set "started_at"',
+        'update "collection_slots" set',
       )
     ) {
       return;

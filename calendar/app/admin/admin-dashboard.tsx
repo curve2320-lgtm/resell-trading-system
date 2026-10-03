@@ -392,7 +392,7 @@ export function AdminDashboard({
           </div>
         </div>
         <p className="admin-health-message">
-          공식 계정의 원문 링크와 확인한 일정만 저장합니다. 게시물 자체를 수집하거나 복제하지 않습니다.
+          공식 API 인증이 연결되면 발매 공지를 자동 확인합니다. 날짜가 모호한 공지는 검수 대상으로 남기며, 직접 확인한 공지도 아래에서 등록할 수 있습니다.
         </p>
         <form className="admin-sns-form" onSubmit={submitSns}>
           <label>

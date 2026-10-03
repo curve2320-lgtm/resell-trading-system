@@ -26,6 +26,12 @@ const settle = async () => { for (let index = 0; index < 12; index++) await Prom
 const payload = (status: "stale" | "current" = "stale", releases: unknown[] = []) =>
   Response.json({ releases, sources: { database: { count: releases.length } }, collection: { status, message: status === "stale" ? "in progress" : null } });
 
+test("calendar navigation requests its actual month so uncached history is collected", async () => {
+  const urls:string[]=[];
+  const loader=createReleaseFeedLoader({month:"2026-09",request:async url=>{urls.push(url);return payload("current");},onResponse:()=>{},onError:()=>assert.fail()});
+  loader.start();await settle();loader.stop();assert.deepEqual(urls,["/api/releases?month=2026-09"]);
+});
+
 test("the request callback is unbound so native browser fetch has no invalid receiver", async () => {
   const timer = clock(); let received = 0;
   const loader = createReleaseFeedLoader({

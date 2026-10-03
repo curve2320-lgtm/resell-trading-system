@@ -27,7 +27,8 @@ export type ReleaseSourceKey =
   | "salomon"
   | "asics"
   | "tune"
-  | "sns";
+  | "sns"
+  | "instagramPublic";
 
 const DEFAULT_OFF: string[] = [];
 

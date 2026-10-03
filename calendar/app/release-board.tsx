@@ -10,6 +10,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { ReleaseBadges } from "./release-badges";
+import { OfficialInstagramDialog } from "./official-instagram-dialog";
 import { SavedReleaseButton } from "./saved-release-button";
 import {
   createSavedReleaseController,
@@ -20,7 +21,7 @@ import {
   releaseDestination,
   safeRetailerUrl,
 } from "./release-links";
-import { safeAnnouncementUrl } from "./sns-links";
+import { safeAnnouncementUrl, isInstagramSource } from "./sns-links";
 import { expandedSourceCatalog } from "./expanded-sources";
 import { downloadReleaseCalendar, releaseCalendarEventCount } from "./release-calendar-export";
 import { createReleaseFeedLoader, releaseFeedCountLabel, type ReleaseCollectionState } from "./release-feed-loader";
@@ -142,6 +143,7 @@ type SourceKey =
   | "asics"
   | "tune"
   | "sns"
+  | "instagramPublic"
   | (typeof expandedSourceCatalog)[number]["key"]
   | "database";
 
@@ -246,6 +248,7 @@ const sourceCatalog: {
   { key: "asics", icon: "AS", label: "ASICS 공식 달력", url: "https://www.asics.co.kr/board/?id=spscalendar" },
   { key: "tune", icon: "T", label: "TUNE", url: "https://tune.kr" },
   { key: "sns", icon: "IG", label: "공식 Instagram 공지" },
+  { key: "instagramPublic", icon: "IG", label: "홈페이지 공개 Instagram 공지" },
   ...expandedSourceCatalog.map((source) => ({
     key: source.key, icon: source.label.slice(0, 2).toUpperCase(),
     label: source.label, url: source.url,
@@ -783,8 +786,8 @@ function DirectLink({
 }
 
 function AnnouncementLink({ release }: { release: Release }) {
-  const source = release.channels?.find((channel) => channel.sourceKey === "sns");
-  const url = safeAnnouncementUrl(source?.sourceUrl ?? (release.sourceName === "sns" ? release.sourceUrl : null));
+  const source = release.channels?.find((channel) => isInstagramSource(channel.sourceKey));
+  const url = safeAnnouncementUrl(source?.sourceUrl ?? (isInstagramSource(release.sourceName) ? release.sourceUrl : null));
   if (!url) return null;
   return (
     <a className="source-reference" href={url} target="_blank" rel="noreferrer">
@@ -1093,6 +1096,7 @@ export function ReleaseBoard({
     }
     setLoadState((previous) => previous === "live" ? previous : "loading");
     const loader = createReleaseFeedLoader<Release, SourceHealth>({
+      month: activeMonth,
       request: fetch,
       onResponse: (data) => {
         if (data.sources) setSourceHealth(data.sources);
@@ -1108,7 +1112,7 @@ export function ReleaseBoard({
     });
     loader.start();
     return () => loader.stop();
-  }, [demoReleases, reloadKey]);
+  }, [demoReleases, reloadKey, activeMonth]);
 
   useEffect(() => {
     if (signedIn) void savedController.load();
@@ -1370,6 +1374,7 @@ export function ReleaseBoard({
       )}
 
       <section className="discovery-controls" aria-label="발매 둘러보기">
+        <OfficialInstagramDialog status={sourceHealth.sns?.status} publicStatus={sourceHealth.instagramPublic?.status} publicCount={sourceHealth.instagramPublic?.count} />
         {view === "today" && <div>
           <span className="section-kicker">RELEASE DISCOVERY</span>
           <p>카테고리와 발매 유형으로 빠르게 골라보세요.</p>

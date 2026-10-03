@@ -27,3 +27,6 @@ export function safeAnnouncementUrl(
   return value ? canonicalizeInstagramPostUrl(value) : null;
 }
 
+export function isInstagramSource(sourceKey: string | undefined): boolean {
+  return sourceKey === "sns" || sourceKey === "instagramPublic";
+}

@@ -4,6 +4,31 @@ import type { AdapterReleaseInput, ReleaseCategory } from "./types.ts";
 
 export const SIBNA_RSS_URL = "https://sibna.kr/today/rss.php";
 const SIBNA_CALENDAR_URL = "https://sibna.kr/today/upcoming";
+export const SIBNA_FIRST_CALENDAR_MONTH = "2021-01";
+export const SIBNA_LAST_CALENDAR_MONTH = "2028-12";
+
+/** Restrict on-demand history jobs to SIBNA's observed public calendar navigation. */
+export function isSibnaCalendarMonth(value:string): boolean {
+  return /^\d{4}-(?:0[1-9]|1[0-2])$/.test(value) && value>=SIBNA_FIRST_CALENDAR_MONTH && value<=SIBNA_LAST_CALENDAR_MONTH;
+}
+
+/** Nearby historical and future months are collected first; every job remains bounded. */
+export function sibnaCalendarWindow(now:Date, past=12, future=12): string[] {
+  if (![past,future].every(value=>Number.isInteger(value) && value>=0 && value<=96) || !Number.isFinite(now.getTime()))
+    throw new Error("Invalid SIBNA calendar month range.");
+  const current=seoulDateTime(now)?.date.slice(0,7)??now.toISOString().slice(0,7);
+  const [year,month]=current.split("-").map(Number),months:string[]=[];
+  const add=(offset:number)=>{
+    const value=new Date(Date.UTC(year,month-1+offset,1)).toISOString().slice(0,7);
+    if (isSibnaCalendarMonth(value)) months.push(value);
+  };
+  add(0);
+  for(let distance=1;distance<=Math.max(past,future);distance++) {
+    if(distance<=past) add(-distance);
+    if(distance<=future) add(distance);
+  }
+  return months;
+}
 
 export type SibnaParseResult = {
   recognized: boolean;
@@ -14,7 +39,11 @@ export type SibnaParseResult = {
 };
 
 const empty = (): SibnaParseResult => ({recognized:false,releases:[],total:0,filtered:0,malformed:0});
-const NON_PRODUCT = /KFC|맥도날드|버거킹|치킨|치킨올데이|햄버거|피자|도넛|케이크|음료\s*(?:출시|행사)|쿠폰|카드\s*혜택|\b(?:coupon|cashback)\b|할인\s*(?:행사|쿠폰)|세금|세금계산서|주식\s*휴장|나스닥|증시|지수|환율|실적\s*발표|경제\s*일정|영화\s*개봉|영화관|콘서트|공연\s*티켓|항공권|여행\s*특가|호텔\s*(?:예약|특가)|서머타임|섬머타임|썸머타임|공식\s*러닝|마라톤|퍼레이드|스포츠\s*경기/iu;
+const NON_PRODUCT = /KFC|맥도날드|버거킹|맘스터치|치킨|치킨올데이|햄버거|불고기\s*버거|쿼터파운더|삼계탕|사발면|피자|도넛|케이크|음료\s*(?:출시|행사)|쿠폰|카드\s*혜택|\b(?:coupon|cashback)\b|할인\s*(?:행사|쿠폰)|세금|세금계산서|주식\s*휴장|나스닥|증시|지수|환율|실적\s*발표|경제\s*일정|영화\s*개봉|영화관|공연\s*티켓|항공권|항공.*특가|여행\s*특가|호텔\s*(?:예약|특가)|서머타임|섬머타임|썸머타임|공식\s*러닝|마라톤|퍼레이드|스포츠\s*경기|상장(?:일|\s*안내)?\s*$|가격\s*인상\s*$|(?:SK텔레콤|LG유플러스|선호번호|골드번호).*?(?:프로모션|이벤트|신청)|포켓몬고.*프로모션|라이브\s*행사|홍보부스|두린이날.*이벤트/iu;
+const PERFORMANCE = /콘서트|내한공연|팬미팅|fanmeeting|뮤지컬|live\s*tour|페스티벌|페스티발|선예매/iu;
+const PERFORMANCE_GOODS = /피규어|키링|굿즈|머천|merch|팝업|컬[래레]버레이션|콜라보|협업|\s[x×]\s/iu;
+const GENERIC_SALE = /시즌\s*(?:오프\s*)?세일|(?:아울렛|창고|파이널|썸머|한가위|오프라인)\s*세일|세일.*(?:\d+%|추가할인)|\d+%\s*(?:추가)?할인|세일\s*$/iu;
+const SNEAKER_SAIL_COLOR = /(?:나이키|nike|조던|jordan).*(?:덩크|dunk|에어\s*(?:포스|맥스)|air\s+(?:force|max)|코르테즈|cortez|문\s*슈|moon\s*shoe).*세일\s*$/iu;
 const INFORMATION_PRODUCT = /한정|발매|출시|제품|상품|입고|피규어|미니피겨|키링|굿즈|TCG|카드\s*게임|실버바|골드바|사전\s*주문|사전\s*예약|(?:\s+x\s+|\s+with\s+)|\b(?:drop|delivery|collection|capsule|collab|present)\b|매장\s*오픈|스토어\s*오픈|팝업|(?:서울|부산|베이징|도쿄|싱가폴|싱가포르|중국|일본)\s*오픈/iu;
 
 function text(value: string): string {
@@ -41,7 +70,8 @@ function safePostUrl(value: unknown): {url:string;id:string} | null {
 }
 
 function eligible(title:string, method:string): boolean {
-  if (NON_PRODUCT.test(title) || /29cm\s*29데이|^29데이$/iu.test(title) || /경제|여행|음식|영화|공연/.test(method)) return false;
+  const sale=GENERIC_SALE.test(title) && !(SNEAKER_SAIL_COLOR.test(title) && !/시즌|아울렛|창고|추가할인|\d+%/iu.test(title));
+  if (NON_PRODUCT.test(title) || sale || (PERFORMANCE.test(title) && !PERFORMANCE_GOODS.test(title)) || /29cm\s*29데이|^29데이$/iu.test(title) || /경제|여행|음식|영화|공연/.test(method)) return false;
   if (/선착순|응모|추첨|래플|raffle|first.?come/i.test(method)) return true;
   return INFORMATION_PRODUCT.test(title);
 }
@@ -198,6 +228,21 @@ export function createSibnaAdapter(fetchText=fetchSourceText, options:{includeCa
     }
     const items=[...releases.values()],dated=items.filter(item=>item.releaseDate).length;
     return {sourceKey:"sibna",status:succeeded?"connected":"error",releases:items,confirmedEmpty:false,authoritativeSnapshot:false,message:succeeded?`SIBNA 공개 정보 · 발매 ${dated}건${items.length-dated?` · 날짜 미정 ${items.length-dated}건`:""} · 일반 행사 제외 ${filtered}건${failed?` · 일부 연결 실패 ${failed}곳`:""}`:"SIBNA 공개 정보 연결 실패 · 마지막 확인 일정 유지"};
+  }};
+}
+
+/** A single durable history job; its separate claim key never changes source attribution. */
+export function createSibnaCalendarAdapter(month:string, fetchText=fetchSourceText): ReleaseSourceAdapter {
+  if (!isSibnaCalendarMonth(month)) throw new Error("Invalid SIBNA calendar month range.");
+  return {key:"sibna",collectionKey:`sibna:calendar:${month}`,retailer:"SIBNA 발매정보",allowedDomains:["sibna.kr"],async collect(now):Promise<SourceCollectionResult> {
+    try {
+      const result=parseSibnaCalendar(await fetchText(`${SIBNA_CALENDAR_URL}?month=${month}`),now);
+      if (!result.recognized) throw new Error("Unrecognized public calendar.");
+      const dated=result.releases.filter(release=>release.releaseDate).length;
+      return {sourceKey:"sibna",status:"connected",releases:result.releases,confirmedEmpty:false,authoritativeSnapshot:false,message:`SIBNA ${month} 공개 발매정보 · 발매 ${dated}건${result.releases.length-dated?` · 날짜 미정 ${result.releases.length-dated}건`:""} · 일반 행사 제외 ${result.filtered}건`};
+    } catch {
+      return {sourceKey:"sibna",status:"error",releases:[],confirmedEmpty:false,authoritativeSnapshot:false,message:`SIBNA ${month} 공개 발매정보 연결 실패 · 마지막 확인 일정 유지`};
+    }
   }};
 }
 
