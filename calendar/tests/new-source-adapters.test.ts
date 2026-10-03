@@ -23,7 +23,100 @@ import {
   parseTuneProducts,
 } from "../app/tune.ts";
 import { releaseSourceAdapters } from "../app/collection/registry.ts";
+import { createExistingAdapter } from "../app/collection/existing-adapters.ts";
+import { classifyRelease } from "../app/collection/classify.ts";
 import type { ExternalRelease } from "../app/source-types.ts";
+
+function shoeprizeRelease(overrides: Partial<ExternalRelease> = {}): ExternalRelease {
+  return {
+    id: "shoeprize:248065", externalId: "shoeprize:248065",
+    title: "송 포 더 뮤트 x 아디다스 오리지널스 삼바 데컨", brand: "adidas",
+    category: "선착순", releaseDate: "2026-10-16", releaseTime: "10:00",
+    channel: "NAKED", sourceName: "SHOEPRIZE",
+    sourceUrl: "https://www.shoeprize.com/product/song-for-the-mute-samba-hp8256",
+    status: "예정", confidence: 100, note: "", isFeatured: false,
+    retailer: "NAKED", styleCode: "HP8256", region: "덴마크", marketScope: "overseas",
+    productUrl: "https://nakedcph.com/products/song-for-the-mute-samba-hp8256",
+    ...overrides,
+  };
+}
+
+async function classifiedShoeprize(rows: ExternalRelease[]) {
+  const adapter = createExistingAdapter({
+    key: "shoeprize", retailer: "SHOEPRIZE", allowedDomains: ["shoeprize.com"],
+    fetcher: async () => ({ status: "connected", releases: rows, message: "13 fetched" }),
+  });
+  const result = await adapter.collect(new Date("2026-10-04T00:00:00Z"));
+  return result.releases.map((release) => classifyRelease({ ...release, allowedDomains: adapter.allowedDomains }));
+}
+
+test("SHOEPRIZE retains the three October 16 NAKED schedules with approved retailer links", async () => {
+  const rows = ["HP8256", "HP8257", "HQ7600"].map((styleCode, index) => shoeprizeRelease({
+    id: `shoeprize:${248065-index}`, externalId: `shoeprize:${248065-index}`, styleCode,
+    productUrl: `https://nakedcph.com/products/song-for-the-mute-samba-${styleCode.toLowerCase()}`,
+  }));
+  const results = await classifiedShoeprize(rows);
+  assert.deepEqual(results.map(({ reviewReason }) => reviewReason), [null, null, null]);
+  assert.deepEqual(results.map(({ release }) => release?.releaseDate), ["2026-10-16", "2026-10-16", "2026-10-16"]);
+  assert.deepEqual(results.map(({ release }) => release?.productUrl), rows.map(({ productUrl }) => productUrl));
+  assert.equal(results[0].release?.region, "덴마크");
+  assert.equal(results[0].release?.marketScope, "overseas");
+});
+
+test("SHOEPRIZE unwraps a known affiliate redirect only to an approved retailer", async () => {
+  const target = "https://www.lego.com/ko-kr/product/playstation-72306?utm_source=shoeprize";
+  const [result] = await classifiedShoeprize([shoeprizeRelease({
+    styleCode: "72306", region: "한국", marketScope: "korea", releaseDate: "2026-10-04",
+    productUrl: `https://redirect.viglink.com/?u=${encodeURIComponent(target)}`,
+  })]);
+  assert.equal(result.reviewReason, null);
+  assert.equal(result.release?.productUrl, target);
+  assert.equal(result.release?.styleCode, "72306");
+  assert.equal(result.release?.releaseDate, "2026-10-04");
+});
+
+test("SHOEPRIZE retains confirmed dates through its trusted source when the purchase target is unapproved", async () => {
+  const targets = [
+    "https://new-retailer.example/product/1",
+    "https://nakedcph.com.attacker.example/product/1",
+    "https://redirect.viglink.com/?u=https%3A%2F%2Fattacker.example%2Fproduct",
+    "https://redirect.viglink.com/?u=javascript%3Aalert%281%29",
+    "https://user:password@nakedcph.com/product/1",
+    "http://nakedcph.com/product/1",
+  ];
+  const results = await classifiedShoeprize(targets.map((productUrl) => shoeprizeRelease({ productUrl })));
+  for (const result of results) {
+    assert.equal(result.reviewReason, null);
+    assert.equal(result.release?.productUrl, shoeprizeRelease().sourceUrl);
+    assert.equal(result.release?.releaseDate, "2026-10-16");
+  }
+});
+
+test("SHOEPRIZE requires its own secure source provenance even when the purchase URL is approved", async () => {
+  const sourceUrls = [
+    "https://shoeprize.com.attacker.example/product/1", "https://nakedcph.com/product/1",
+    "http://www.shoeprize.com/product/1", "https://user:password@shoeprize.com/product/1",
+    "https://shoeprize.com:8443/product/1",
+  ];
+  const results = await classifiedShoeprize(sourceUrls.map((sourceUrl) => shoeprizeRelease({ sourceUrl })));
+  assert.equal(results.every(({ reviewReason }) => reviewReason === "invalid_source_url"), true);
+});
+
+test("SHOEPRIZE preserves dated raffle periods and Korean retailer metadata", async () => {
+  const row = shoeprizeRelease({
+    externalId: "shoeprize:248161", title: "포켓몬 TCG 30주년 셀레브레이션 퓨처리스틱 박스",
+    category: "응모", releaseMethod: "응모", releaseDate: "2026-10-05", styleCode: "PT-30-CFB",
+    retailer: "포켓몬 스토어", region: "한국", marketScope: "korea", shippingMethod: "국내배송",
+    priceLabel: "150,000원", startAt: "2026-10-01T00:00:00+09:00", endAt: "2026-10-05T23:59:00+09:00",
+    productUrl: "https://pokemonstore.co.kr/pages/pokemoncardgame30th/draw.html",
+  });
+  const [result] = await classifiedShoeprize([row]);
+  assert.equal(result.reviewReason, null);
+  assert.equal(result.release?.releaseKind, "raffle");
+  for (const field of ["productUrl", "sourceUrl", "retailer", "releaseDate", "styleCode", "region", "marketScope", "shippingMethod", "priceLabel", "startAt", "endAt"] as const) {
+    assert.equal(result.release?.[field], row[field]);
+  }
+});
 
 function fixture(name: string) {
   return readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");

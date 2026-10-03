@@ -7,6 +7,7 @@ import { fetchSalomonReleases } from "../salomon.ts";
 import { fetchTuneReleases } from "../tune.ts";
 import { expandedReleaseSourceAdapters } from "./expanded-adapters.ts";
 import { instagramReleaseAdapter } from "./instagram-adapter.ts";
+import { sibnaReleaseAdapter } from "./sibna-adapter.ts";
 import {
   sourceEnabled,
   type ReleaseSourceKey,
@@ -51,7 +52,9 @@ const newReleaseSourceAdapters: ReleaseSourceAdapter[] = [
 ];
 
 export function enabledReleaseSourceAdapters(): ReleaseSourceAdapter[] {
-  return [...existingReleaseSourceAdapters, ...newReleaseSourceAdapters, ...expandedReleaseSourceAdapters, instagramReleaseAdapter].filter(
+  return [...existingReleaseSourceAdapters, ...newReleaseSourceAdapters,
+    ...expandedReleaseSourceAdapters.filter(({ key }) => key !== "sibna"),
+    sibnaReleaseAdapter, instagramReleaseAdapter].filter(
     (adapter) => sourceEnabled(adapter.key as ReleaseSourceKey),
   );
 }

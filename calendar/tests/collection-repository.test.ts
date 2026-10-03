@@ -17,6 +17,7 @@ import {
   type SourceHealth,
 } from "../app/collection/repository.ts";
 import { runCollection } from "../app/collection/run.ts";
+import { releaseAppearsOnDate } from "../app/release-schedule-days.ts";
 import type { ReleaseSourceAdapter } from "../app/collection/registry.ts";
 import {
   changedFields,
@@ -77,6 +78,43 @@ test("public API preserves schedule details, note and original method on every c
   assert.equal(published.channels[0].announcementAt,release.announcementAt);
 });
 
+test("cached public API retains explicit first-come lifestyle periods while information stays information", async () => {
+  const repository = productionRepository(new SQLiteD1());
+  const emart: CollectedRelease = {
+    ...baseRelease, sourceKey:"sibna", externalId:"sibna:2022",
+    title:"이마트24 포켓몬 30주년 카드 입고", brand:null, category:"lifestyle", styleCode:null,
+    releaseDate:"2026-10-03", releaseTime:null, releaseMethod:"선착순",
+    startAt:"2026-10-03", endAt:"2026-10-05", startTimeUnknown:true, endTimeUnknown:true,
+    retailer:"SIBNA 발매정보", productUrl:"https://sibna.kr/today/post/2022-emart-pokemon",
+    sourceUrl:"https://sibna.kr/today/post/2022-emart-pokemon",
+  };
+  const information = {...emart, externalId:"sibna:1939",title:"DOSSY with 복심이",releaseMethod:"정보"};
+  const fashion = {...emart,externalId:"sibna:3000",title:"Fashion capsule",category:"fashion" as const,releaseMethod:"first-come-first-served"};
+  const genericFashion = {...fashion,externalId:"sibna:3001",title:"Fashion announcement",releaseMethod:null};
+  const raffle = {...emart,externalId:"sibna:1888",title:"Pokémon raffle",releaseKind:"raffle" as const};
+  await repository.persistSourceResult(sourceResult({sourceKey:"sibna",groups:groupCollectedReleases([emart,information,fashion,genericFashion,raffle])}));
+  const cached = (await repository.listCachedReleases()).find(item=>item.title===emart.title)!;
+  assert.equal(cached.channels[0].releaseMethod,"선착순");
+  assert.equal(cached.channels[0].endAt,"2026-10-05");
+  assert.equal(cached.channels[0].endTimeUnknown,true);
+  const published = (await readReleaseApiPayload(repository,["sibna"])).releases;
+  const sale = published.find(item=>item.title===emart.title)!;
+  assert.equal(sale.category,"선착순");
+  assert.equal(sale.catalogCategory,"lifestyle");
+  assert.equal(sale.startAt,emart.startAt);
+  assert.equal(sale.endAt,emart.endAt);
+  assert.equal(sale.startTimeUnknown,true);
+  assert.equal(sale.endTimeUnknown,true);
+  assert.equal(releaseAppearsOnDate(sale,"2026-10-04"),true);
+  assert.equal(releaseAppearsOnDate(sale,"2026-10-06"),false);
+  const info = published.find(item=>item.title===information.title)!;
+  assert.equal(info.category,"정보");
+  assert.equal(releaseAppearsOnDate(info,"2026-10-04"),false);
+  assert.equal(published.find(item=>item.title===fashion.title)?.category,"선착순");
+  assert.equal(published.find(item=>item.title===genericFashion.title)?.category,"정보");
+  assert.equal(published.find(item=>item.title===raffle.title)?.category,"응모");
+});
+
 test("cached same-market SKU peers still detect conflicting schedules", async () => {
   const repository = productionRepository(new SQLiteD1());
   const first={...baseRelease, sourceKey:"newBalanceUS", retailer:"US Store", releaseTime:"10:00"};
@@ -84,6 +122,57 @@ test("cached same-market SKU peers still detect conflicting schedules", async ()
   await repository.persistSourceResult(sourceResult({sourceKey:first.sourceKey,groups:groupCollectedReleases([first])}));
   await repository.persistSourceResult(sourceResult({sourceKey:second.sourceKey,groups:groupCollectedReleases([second])}));
   assert.deepEqual((await repository.listReviewItems()).filter(item=>item.reason==="conflicting_schedule").map(item=>item.sourceKey).sort(),[first.sourceKey,second.sourceKey].sort());
+});
+
+function actualRetailerEvents(): CollectedRelease[] {
+  return [
+    {...baseRelease,sourceKey:"shoeprize",externalId:"shoeprize:248080",title:"에어 조던 1 하이 OG 로얄",styleCode:"IQ5495-005",retailer:"훕시티",productUrl:"https://www.hoopcity.co.kr/product-detail/136616596",releaseDate:"2026-10-05",releaseTime:"00:00"},
+    {...baseRelease,sourceKey:"shoeprize",externalId:"shoeprize:248218",title:"나이키 에어 맥스 고아돔 로우 블랙",styleCode:"IV4517-001",retailer:"튠",productUrl:"https://tune.kr/products/air-max-goadome-low-nk266xsesn10",releaseDate:"2026-10-06",releaseTime:"09:30"},
+    {...baseRelease,sourceKey:"shoeprize",externalId:"shoeprize:248216",title:"나이키 에어 맥스 고아돔 로우 미드나잇 네이비",styleCode:"IV4517-400",retailer:"튠",productUrl:"https://tune.kr/products/air-max-goadome-low-nk266xsesn12",releaseDate:"2026-10-06",releaseTime:"09:30"},
+  ].map(release=>({...release,region:"한국",marketScope:"korea" as const,releaseMethod:"온라인 선착순",sourceUrl:"https://www.shoeprize.com/product/verified-retailer-event"}));
+}
+
+test("runCollection SQL API preserves three actual retailer schedules independently from Nike", async () => {
+  const repository = productionRepository(new SQLiteD1());
+  const shoeprize = actualRetailerEvents();
+  const nike = shoeprize.map((release,index)=>({...release,sourceKey:"nike",externalId:`nike:${index}`,retailer:"Nike SNKRS Korea",productUrl:`https://www.nike.com/kr/launch/t/product-${index}`,sourceUrl:`https://www.nike.com/kr/launch/t/product-${index}`,releaseDate:index===0?"2026-10-10":release.releaseDate,releaseTime:"10:00"}));
+  const adapter = (key:string,rows:CollectedRelease[]):ReleaseSourceAdapter => ({
+    key,retailer:key,allowedDomains:["nike.com","shoeprize.com","tune.kr","hoopcity.co.kr"],
+    collect:async()=>({sourceKey:key,status:"connected",message:"verified schedules",confirmedEmpty:false,releases:rows.map(({category,releaseKind,...release})=>({...release,categoryHint:category,releaseKindHint:releaseKind,allowedDomains:["nike.com","shoeprize.com","tune.kr","hoopcity.co.kr"]}))}),
+  });
+  await runCollection({repository,adapters:[adapter("nike",nike),adapter("shoeprize",shoeprize)],now:new Date("2026-10-04T00:00:00Z")});
+  const payload = await readReleaseApiPayload(repository,["nike","shoeprize"]);
+  assert.equal(payload.releases.length,6);
+  assert.equal((await repository.listReviewItems()).length,0);
+  for (const original of [...shoeprize,...nike]) {
+    const published = payload.releases.find(release=>release.channels.some(channel=>channel.externalId===original.externalId))!;
+    assert.ok(published,original.externalId);
+    assert.equal(published.releaseDate,original.releaseDate);
+    assert.equal(published.releaseTime,original.releaseTime);
+    assert.equal(published.styleCode,original.styleCode);
+    assert.equal(published.marketScope,"korea");
+  }
+});
+
+test("cached same-TUNE seller conflicts remain reviewable while seller corrections preserve identity", async () => {
+  const repository = productionRepository(new SQLiteD1());
+  const shoe = actualRetailerEvents()[1];
+  const tune = {...shoe,sourceKey:"tune",externalId:"tune:nk266xsesn10",region:"대한민국",sourceUrl:shoe.productUrl};
+  await repository.persistSourceResult(sourceResult({sourceKey:"tune",groups:groupCollectedReleases([tune])}));
+  await repository.persistSourceResult(sourceResult({sourceKey:"shoeprize",groups:groupCollectedReleases([{...shoe,releaseTime:"10:00"}])}));
+  assert.equal((await repository.listReviewItems()).some(item=>item.sourceKey==="shoeprize"&&item.externalId===shoe.externalId&&item.reason==="conflicting_schedule"),true);
+  const correctedD1 = new SQLiteD1();
+  const correctedRepo = productionRepository(correctedD1);
+  await correctedRepo.persistSourceResult(sourceResult({sourceKey:"shoeprize",groups:groupCollectedReleases([shoe])}));
+  const [before] = await correctedRepo.listCachedReleases();
+  await correctedRepo.persistSourceResult(sourceResult({sourceKey:"shoeprize",collectedAt:t1,groups:groupCollectedReleases([{...shoe,collectedAt:t1,releaseDate:"2026-10-07"}])}));
+  const [after] = await correctedRepo.listCachedReleases();
+  assert.equal(after.id,before.id);
+  assert.equal(after.canonicalKey,before.canonicalKey);
+  assert.equal(after.releaseDate,"2026-10-07");
+  assert.deepEqual(correctedD1.rows<{field:string;previous_value:string;next_value:string}>("select field, previous_value, next_value from release_changes"),[{field:"releaseDate",previous_value:"2026-10-06",next_value:"2026-10-07"}]);
+  assert.equal((await readReleaseApiPayload(correctedRepo)).releases[0].styleCode,"IV4517-001");
+  assert.equal((await correctedRepo.listReviewItems()).length,0);
 });
 
 test("legacy channels backfill note and SKU without overwriting catalog edits", async () => {

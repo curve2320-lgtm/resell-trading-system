@@ -47,6 +47,16 @@ test("scheduled source refresh uses a versioned source slot and a ninety-second 
   assert.equal(repo.persisted.length,1);
 });
 
+test("a corrected SHOEPRIZE parser refreshes the current slot while completed sources stay cached",async()=>{
+  const {startReleaseRefreshBatch}=await import("../app/collection/refresh.ts"),run=scheduled();
+  const repo=repository([
+    {slotKey:"refresh:v3:2026-10-04@09:30:shoeprize",status:"completed",startedAt:now.toISOString()},
+    {slotKey:run.sourceRefreshSlotKey("nike",now),status:"completed",startedAt:now.toISOString()},
+  ]),started:string[]=[],background:Promise<unknown>[]=[];
+  const result=await startReleaseRefreshBatch({repository:repo.result,adapters:["nike","shoeprize"].map(key=>adapter(key,async()=>{started.push(key);return response(key);})),now,waitUntil:job=>{background.push(job);}});
+  assert.equal(result.pendingSources,1);await background[0];assert.deepEqual(started,["shoeprize"]);
+});
+
 test("scheduled adapter deadline persists an error and ignores a late successful result",async()=>{
   const run=scheduled(),repo=repository();
   let finish!:(value:SourceCollectionResult)=>void;

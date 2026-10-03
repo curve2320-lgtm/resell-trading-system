@@ -82,6 +82,14 @@ function titleTokens(title: string): Set<string> {
 }
 
 function hasSimilarTitle(left: CollectedRelease, right: CollectedRelease): boolean {
+  // Separate authored posts describe distinct retailer, color or market schedules.
+  // Their validated numeric identities are stronger evidence than title overlap.
+  if (
+    left.sourceKey === "sibna" && right.sourceKey === "sibna" &&
+    /^sibna:\d+$/.test(left.externalId) && /^sibna:\d+$/.test(right.externalId) &&
+    left.externalId !== right.externalId
+  ) return false;
+
   if (
     normalizedStyleCode(left.styleCode) ||
     normalizedStyleCode(right.styleCode) ||

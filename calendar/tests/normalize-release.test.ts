@@ -53,3 +53,14 @@ test("canonicalReleaseKey treats full-width and ASCII style codes as equivalent"
   assert.equal(ascii, "style:abc123");
   assert.equal(fullWidth, ascii);
 });
+
+test("verified TUNE and HoopsCity seller identity stays stable across date corrections", () => {
+  const tune = {...baseRelease,sourceKey:"shoeprize",styleCode:"IV4517-001",region:"한국",productUrl:"https://tune.kr/products/air-max-goadome-low-nk266xsesn10?utm_source=shoeprize"};
+  assert.equal(canonicalReleaseKey(tune),"style:iv4517001:seller:tune.kr");
+  assert.equal(canonicalReleaseKey({...tune,sourceKey:"tune",region:"대한민국",releaseDate:"2026-08-02",releaseTime:"09:30"}),canonicalReleaseKey(tune));
+  assert.equal(canonicalReleaseKey({...tune,styleCode:"IQ5495-005",productUrl:"https://www.hoopcity.co.kr/product-detail/136616596"}),"style:iq5495005:seller:hoopcity.co.kr");
+  for (const productUrl of ["http://tune.kr/products/1","https://user:pass@tune.kr/products/1","https://tune.kr:8443/products/1","https://tune.kr.attacker.example/products/1","https://other.example/products/1"]) {
+    assert.equal(canonicalReleaseKey({...tune,productUrl}),"style:iv4517001");
+  }
+  assert.equal(canonicalReleaseKey({...tune,sourceKey:"nike"}),"style:iv4517001");
+});

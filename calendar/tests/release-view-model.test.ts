@@ -11,6 +11,7 @@ import {
   releaseChannelCount,
 } from "../app/release-filters.tsx";
 import { releaseBadgeLabels } from "../app/release-badges.tsx";
+import { releaseTimeLabel } from "../app/release-board.tsx";
 
 type FixtureRelease = {
   id: string;
@@ -332,6 +333,45 @@ test("selected-day overseas view hides schedule tabs and bypasses raffle schedul
   assert.equal(normalView.effectiveMode, "entry");
 });
 
+test("all schedule mode exposes general, raffle and overseas products in their source order", () => {
+  const mixed = [
+    ...Array.from({ length: 5 }, (_, index) => fixture({ id: `general-${index}` })),
+    fixture({ id: "entry", category: "응모", releaseKind: "raffle" }),
+    ...Array.from({ length: 3 }, (_, index) => fixture({ id: `overseas-${index}`, marketScope: "overseas" })),
+  ];
+  const view = releaseFilterModule.selectedDayScheduleView(mixed, "all", "all", false);
+  assert.equal(view.effectiveMode, "all");
+  assert.equal(view.showScheduleTabs, true);
+  assert.deepEqual(view.visibleReleases.map(({ id }) => id), mixed.map(({ id }) => id));
+  assert.equal(releaseFilterModule.releasesForScheduleMode(mixed, "general").length, 5);
+  assert.equal(releaseFilterModule.releasesForScheduleMode(mixed, "entry").length, 1);
+  assert.equal(releaseFilterModule.releasesForScheduleMode(mixed, "overseas").length, 3);
+  assert.equal(mixed.length, 9);
+});
+
+test("an overseas-only date remains populated in the unscoped all schedule view", () => {
+  const items = Array.from({ length: 18 }, (_, index) => fixture({ id: `overseas-${index}`, marketScope: "overseas" }));
+  const view = releaseFilterModule.selectedDayScheduleView(items, "all", "all", false);
+  assert.equal(view.visibleReleases.length, 18);
+  assert.equal(view.effectiveMode, "all");
+});
+
+test("daily all schedule mode composes filters and retains the raffle override", () => {
+  const items = [
+    fixture({ id: "general", catalogCategory: "fashion" }),
+    fixture({ id: "entry", category: "응모", releaseKind: "raffle" }),
+    fixture({ id: "overseas", marketScope: "overseas" }),
+  ];
+  const all = releaseFilterModule.releaseScheduleView(items, "all", "all");
+  assert.equal(all.count, 3);
+  assert.deepEqual(all.visibleReleases.map(({ id }) => id), ["general", "entry", "overseas"]);
+  const category = releaseFilterModule.releaseScheduleView(items, "sneakers", "all");
+  assert.deepEqual(category.visibleReleases.map(({ id }) => id), ["entry", "overseas"]);
+  const raffle = releaseFilterModule.releaseScheduleView(items, "raffle", "all");
+  assert.equal(raffle.effectiveMode, "entry");
+  assert.deepEqual(raffle.visibleReleases.map(({ id }) => id), ["entry"]);
+});
+
 test("selected-day empty copy distinguishes an empty date from active filters", () => {
   const selectedDayEmptyCopy = (
     releaseFilterModule as {
@@ -587,4 +627,23 @@ test("badge component renders the view-model labels as an accessible group", () 
   assert.match(markup, /aria-label="발매 특징"/);
   assert.match(markup, />COLLAB</);
   assert.match(markup, />일정 변경</);
+});
+
+test("raffle card 1888 shows its confirmed closing clock instead of the opening releaseTime", () => {
+  assert.equal(releaseTimeLabel({category:"응모",releaseTime:"10:00",startAt:"2026-09-29T10:00:00+09:00",endAt:"2026-10-05T14:59:00+09:00"}), "마감 10/5 14:59");
+  assert.equal(releaseTimeLabel({category:"응모",releaseTime:"10:00",endAt:"2026-10-05T05:59:00Z"}), "마감 10/5 14:59");
+});
+
+test("unknown endpoint clock times show their confirmed date without inventing midnight", () => {
+  assert.equal(releaseTimeLabel({category:"응모",releaseTime:"10:00",endAt:"2026-10-05",endTimeUnknown:true}), "마감 10/5 시간 미정");
+  assert.equal(releaseTimeLabel({category:"응모",releaseTime:"10:00",endAt:"2026-10-05T00:00:00+09:00",endTimeUnknown:true}), "마감 10/5 시간 미정");
+  assert.equal(releaseTimeLabel({category:"선착순",releaseTime:null,startAt:"2026-09-29",startTimeUnknown:true}), "시작 9/29 시간 미정");
+});
+
+test("start-only cards use the actual opening time and invalid endpoints cannot fabricate a closing prefix", () => {
+  assert.equal(releaseTimeLabel({category:"응모",releaseTime:"14:59",startAt:"2026-09-29T10:00:00+09:00"}), "시작 9/29 10:00");
+  for (const endAt of [undefined,"invalid","2026-02-30T10:00:00+09:00","2026-10-05","2026-10-05T14:59:00"]) {
+    assert.equal(releaseTimeLabel({category:"응모",releaseTime:"10:00",endAt}), "10:00");
+  }
+  assert.equal(releaseTimeLabel({category:"응모",releaseTime:null},"시간 미정"), "시간 미정");
 });

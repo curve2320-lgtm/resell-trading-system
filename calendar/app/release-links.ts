@@ -19,6 +19,9 @@ export const approvedRetailerHostnames = [
   "salomon.co.kr",
   "asics.co.kr",
   "tune.kr",
+  "hoopcity.co.kr",
+  "socialstatuspgh.runfair.com",
+  "a-ma-maniere.runfair.com",
   ...expandedSourceDomains,
 ] as const;
 

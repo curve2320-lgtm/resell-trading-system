@@ -9,7 +9,7 @@ export type ReleaseFilter =
   | "raffle"
   | "saved";
 
-export type ReleaseScheduleMode = "general" | "entry" | "overseas";
+export type ReleaseScheduleMode = "all" | "general" | "entry" | "overseas";
 
 export type FilterableRelease = {
   id: number | string;
@@ -110,6 +110,7 @@ export function releasesForScheduleMode<T extends FilterableRelease>(
   releases: readonly T[],
   mode: ReleaseScheduleMode,
 ): T[] {
+  if (mode === "all") return [...releases];
   return releases.filter((release) => scheduleModeFor(release) === mode);
 }
 

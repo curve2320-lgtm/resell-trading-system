@@ -363,7 +363,9 @@ async function collectBeforeDeadline(
 }
 
 export function sourceRefreshSlotKey(sourceKey: string, now: Date): string {
-  return `refresh:v2:${collectionSlotKey(now)}:${sourceKey}`;
+  // Retry a corrected parser within the current slot without rerunning other sources.
+  const revision = sourceKey === "shoeprize" ? "v4" : "v2";
+  return `refresh:${revision}:${collectionSlotKey(now)}:${sourceKey}`;
 }
 
 export async function runScheduledSourceCollection(

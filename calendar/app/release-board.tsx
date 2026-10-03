@@ -24,6 +24,7 @@ import { safeAnnouncementUrl } from "./sns-links";
 import { expandedSourceCatalog } from "./expanded-sources";
 import { downloadReleaseCalendar, releaseCalendarEventCount } from "./release-calendar-export";
 import { createReleaseFeedLoader, releaseFeedCountLabel, type ReleaseCollectionState } from "./release-feed-loader";
+import { indexReleasesForDays, releaseAppearsOnDate as appearsOnDate } from "./release-schedule-days";
 import {
   calendarDayCountLabel,
   effectiveScheduleMode,
@@ -261,6 +262,7 @@ const categoryMeta: Record<Category, { label: string; mark: string }> = {
 };
 
 function scheduleModeLabel(mode: ScheduleMode) {
+  if (mode === "all") return "전체";
   if (mode === "entry") return "응모";
   if (mode === "overseas") return "해외";
   return "선착순 · 일반";
@@ -701,16 +703,27 @@ function explicitTimestamp(value: string | null | undefined) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function releaseTimeLabel(release: Release, fallback = "미정") {
-  const prefix =
-    release.category === "응모"
-      ? release.endAt
-        ? "마감 "
-        : release.startAt
-          ? "시작 "
-          : ""
-      : "";
-  return `${prefix}${release.releaseTime ?? fallback}`;
+export function releaseTimeLabel(release: Pick<Release, "releaseTime" | "category" | "startAt" | "endAt" | "startTimeUnknown" | "endTimeUnknown">, fallback = "미정") {
+  const endpointLabel = (value: string | null | undefined, timeUnknown = false) => {
+    if (!value) return null;
+    const day = value.slice(0, 10);
+    const dayInstant = Date.parse(`${day}T00:00:00Z`);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(dayInstant) || new Date(dayInstant).toISOString().slice(0, 10) !== day) return null;
+    if (value === day) return timeUnknown ? `${Number(day.slice(5, 7))}/${Number(day.slice(8))} 시간 미정` : null;
+    if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value)) return null;
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return null;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Seoul", month: "numeric", day: "numeric",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    }).formatToParts(date).map(part => [part.type, part.value]));
+    return `${parts.month}/${parts.day} ${timeUnknown ? "시간 미정" : `${parts.hour}:${parts.minute}`}`;
+  };
+  const end = endpointLabel(release.endAt, release.endTimeUnknown);
+  if (end) return `마감 ${end}`;
+  const start = endpointLabel(release.startAt, release.startTimeUnknown);
+  if (start) return `시작 ${start}`;
+  return release.releaseTime ?? fallback;
 }
 
 function releaseStatusLabel(
@@ -797,8 +810,13 @@ function ScheduleTypeTabs({
 }) {
   const tabs: { value: ScheduleMode; label: string; count: number }[] = [
     {
+      value: "all",
+      label: "전체",
+      count: releases.length,
+    },
+    {
       value: "general",
-      label: "선착순 · 일반",
+      label: "선착순",
       count: releasesForScheduleMode(releases, "general").length,
     },
     {
@@ -982,24 +1000,6 @@ function calendarCells(monthValue: string) {
   });
 }
 
-function appearsOnDate(release: Release, dateIso: string) {
-  if (release.releaseDate === dateIso) return true;
-  if (release.category !== "응모" || !release.startAt || !release.endAt) {
-    return false;
-  }
-
-  const dayStart = Date.parse(`${dateIso}T00:00:00+09:00`);
-  const dayEnd = dayStart + 86_400_000;
-  const start = Date.parse(release.startAt);
-  const end = Date.parse(release.endAt);
-  return (
-    !Number.isNaN(start) &&
-    !Number.isNaN(end) &&
-    start < dayEnd &&
-    end >= dayStart
-  );
-}
-
 export function ReleaseBoard({
   view,
   initialDate,
@@ -1039,11 +1039,11 @@ export function ReleaseBoard({
   const [dailyScope, setDailyScope] =
     useState<DailyScope>(initialDailyScope);
   const [todayScheduleMode, setTodayScheduleMode] =
-    useState<ScheduleMode>("general");
+    useState<ScheduleMode>("all");
   const [tomorrowScheduleMode, setTomorrowScheduleMode] =
-    useState<ScheduleMode>("general");
+    useState<ScheduleMode>("all");
   const [calendarScheduleMode, setCalendarScheduleMode] =
-    useState<ScheduleMode>("general");
+    useState<ScheduleMode>("all");
   const [query, setQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<ReleaseFilter>("all");
   const [overseasOnly, setOverseasOnly] = useState(false);
@@ -1155,12 +1155,11 @@ export function ReleaseBoard({
     [filtered, todayIso],
   );
 
-  const eventsByDate = useMemo(() => {
-    return filtered.reduce<Record<string, Release[]>>((result, release) => {
-      (result[release.releaseDate] ??= []).push(release);
-      return result;
-    }, {});
-  }, [filtered]);
+  const cells = useMemo(() => calendarCells(activeMonth), [activeMonth]);
+  const eventsByDate = useMemo(
+    () => indexReleasesForDays(filtered, cells.map(cell => cell.iso)),
+    [filtered, cells],
+  );
 
   const selectedEvents = eventsByDate[selectedDate] ?? [];
   const selectedDayView = selectedDayScheduleView(
@@ -1262,7 +1261,7 @@ export function ReleaseBoard({
     setSelectedDayOpen(willOpen);
     if (!willOpen) return;
     if (releaseDate !== selectedDate || !selectedDayOpen) {
-      setCalendarScheduleMode("general");
+      setCalendarScheduleMode("all");
     }
     requestAnimationFrame(() => {
       const useDetails =
@@ -1300,8 +1299,6 @@ export function ReleaseBoard({
       setSaving(false);
     }
   }
-
-  const cells = calendarCells(activeMonth);
 
   return (
     <main className={`app-shell${view === "calendar" ? " calendar-page" : ""}`}>
@@ -1606,7 +1603,7 @@ export function ReleaseBoard({
                       <span className={`category-chip cat-${release.category}`}>
                         {categoryMeta[release.category].mark} {categoryMeta[release.category].label}
                       </span>
-                      <span className="status-chip">{statusLabel}</span>
+                      <span className="status-chip">{release.releaseDate !== selectedDate ? release.category === "응모" ? "응모 기간" : "판매 기간" : statusLabel}</span>
                       <ReleaseBadges release={release} />
                     </div>
                     <div className="event-topline-meta">
@@ -1666,7 +1663,7 @@ export function ReleaseBoard({
                           통합 발매 정보 마지막 확인 ·{" "}
                           {release.lastVerifiedLabel ?? "확인 시각 미정"}
                         </span>
-                        <span className={release.confidence < 80 ? "low-confidence" : ""}>신뢰도 {release.confidence}%</span>
+                        <span className={release.confidence < 80 ? "low-confidence" : ""}>{release.sourceName === "sibna" ? "SIBNA 공개 일정" : `신뢰도 ${release.confidence}%`}</span>
                       </footer>
                     </div>
                   </details>
@@ -1782,10 +1779,10 @@ export function ReleaseBoard({
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        공식 출처 ↗
+                        일정 원문 ↗
                       </a>
                     ) : (
-                      <span>공식 출처 확인 중</span>
+                      <span>일정 원문 확인 중</span>
                     )}
                     <span>
                       통합 발매 정보 마지막 확인 ·{" "}
@@ -1841,7 +1838,7 @@ export function ReleaseBoard({
                                       target="_blank"
                                       rel="noopener noreferrer"
                                     >
-                                      공식 출처 ↗
+                                      일정 원문 ↗
                                     </a>
                                   )}
                                 {!channelUrl && !channelSourceUrl && (
@@ -1980,7 +1977,7 @@ export function ReleaseBoard({
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            공식 출처
+                            일정 원문
                           </a>
                         )}
                     </div>

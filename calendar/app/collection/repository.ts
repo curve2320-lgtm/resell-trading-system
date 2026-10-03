@@ -472,6 +472,8 @@ function legacyCategory(
   release: CachedRelease,
 ): ReleaseApiRelease["category"] {
   if (release.releaseKind === "raffle") return "응모";
+  const method = release.channels[0]?.releaseMethod?.trim() ?? "";
+  if (/^(?:선착순|first[- ]come(?:[- ]first[- ]served)?)$/i.test(method)) return "선착순";
   return release.category === "sneakers" ? "선착순" : "정보";
 }
 
@@ -874,7 +876,7 @@ function batchResultHasRows(result: unknown): boolean {
 
 function styleCodeFromCanonicalKey(canonicalKey: string): string | null {
   return canonicalKey.startsWith("style:")
-    ? canonicalKey.slice("style:".length).split(":market:")[0]
+    ? canonicalKey.slice("style:".length).split(/:market:|:seller:/)[0]
     : null;
 }
 

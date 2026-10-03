@@ -12,6 +12,7 @@ import { fetchPalaceReleases } from "../palace.ts";
 import { fetchShoeprizeReleases } from "../shoeprize.ts";
 import { fetchSoldoutReleases } from "../soldout.ts";
 import { fetchWorksoutReleases } from "../worksout.ts";
+import { approvedRetailerHostnames, safeRetailerUrl } from "../release-links.ts";
 import type {
   ExternalRelease,
   SourceFetchResult,
@@ -55,11 +56,39 @@ function releaseKindHint(release: ExternalRelease): ReleaseKind | undefined {
   return undefined;
 }
 
+function existingReleaseUrls(
+  release: Pick<ExternalRelease, "sourceUrl" | "productUrl">,
+  config: ExistingAdapterConfig,
+): { productUrl: string | null; sourceUrl: string | null } {
+  if (config.key !== "shoeprize") {
+    return { productUrl: release.productUrl || release.sourceUrl, sourceUrl: release.sourceUrl };
+  }
+
+  const sourceUrl = safeRetailerUrl(release.sourceUrl);
+  const sourceHost = sourceUrl ? new URL(sourceUrl).hostname.toLowerCase().replace(/\.$/, "") : "";
+  if (sourceHost !== "shoeprize.com" && !sourceHost.endsWith(".shoeprize.com")) {
+    return { productUrl: null, sourceUrl: null };
+  }
+
+  let productUrl = safeRetailerUrl(release.productUrl);
+  if (!productUrl && release.productUrl) {
+    try {
+      const redirect = new URL(release.productUrl);
+      if (redirect.protocol === "https:" && redirect.hostname === "redirect.viglink.com" &&
+          !redirect.username && !redirect.password && !redirect.port) {
+        productUrl = safeRetailerUrl(redirect.searchParams.get("u"));
+      }
+    } catch { /* Keep the confirmed schedule linked to its trusted announcement. */ }
+  }
+  return { productUrl: productUrl ?? sourceUrl, sourceUrl };
+}
+
 function datedRelease(
   release: ExternalRelease,
   config: ExistingAdapterConfig,
   collectedAt: string,
 ): AdapterReleaseInput {
+  const urls = existingReleaseUrls(release, config);
   return {
     sourceKey: config.key,
     externalId: release.externalId,
@@ -72,8 +101,7 @@ function datedRelease(
     priceLabel: release.priceLabel ?? null,
     styleCode: release.styleCode ?? null,
     retailer: release.retailer || release.channel || config.retailer,
-    productUrl: release.productUrl || release.sourceUrl,
-    sourceUrl: release.sourceUrl,
+    ...urls,
     collectedAt,
     allowedDomains: config.allowedDomains,
     ...(release.startAt !== undefined ? {startAt:release.startAt} : {}),
@@ -94,6 +122,7 @@ function undatedRelease(
   config: ExistingAdapterConfig,
   collectedAt: string,
 ): AdapterReleaseInput {
+  const urls = existingReleaseUrls(release, config);
   return {
     sourceKey: config.key,
     externalId: release.id,
@@ -105,8 +134,7 @@ function undatedRelease(
     priceLabel: release.priceLabel ?? null,
     styleCode: release.styleCode ?? null,
     retailer: config.retailer,
-    productUrl: release.productUrl || release.sourceUrl,
-    sourceUrl: release.sourceUrl,
+    ...urls,
     collectedAt,
     allowedDomains: config.allowedDomains,
   };
@@ -115,19 +143,23 @@ function undatedRelease(
 export function createExistingAdapter(
   config: ExistingAdapterConfig,
 ): ReleaseSourceAdapter {
+  const allowedDomains = config.key === "shoeprize"
+    ? [...new Set([...config.allowedDomains, ...approvedRetailerHostnames])]
+    : config.allowedDomains;
+  const collectionConfig = { ...config, allowedDomains };
   return {
     key: config.key,
     retailer: config.retailer,
-    allowedDomains: config.allowedDomains,
+    allowedDomains,
     async collect(now): Promise<SourceCollectionResult> {
       const result = await config.fetcher();
       const collectedAt = now.toISOString();
       const releases = [
         ...result.releases.map((release) =>
-          datedRelease(release, config, collectedAt),
+          datedRelease(release, collectionConfig, collectedAt),
         ),
         ...(result.undated ?? []).map((release) =>
-          undatedRelease(release, config, collectedAt),
+          undatedRelease(release, collectionConfig, collectedAt),
         ),
       ];
       const snapshotComplete =
