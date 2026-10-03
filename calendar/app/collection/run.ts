@@ -48,6 +48,17 @@ type RunSourceCollectionInput = RunCollectionInput & {
   sourceKey: string;
 };
 
+export const SOURCE_REFRESH_CLAIM_TTL_MS = 90_000;
+export const SOURCE_REFRESH_ADAPTER_DEADLINE_MS = 20_000;
+
+export type ScheduledSourceCollectionInput = {
+  repository: CollectionRepository;
+  adapter: ReleaseSourceAdapter;
+  now: Date;
+  randomUUID?: () => string;
+  adapterDeadlineMs?: number;
+};
+
 type PreparedSourceResult = {
   result: PersistSourceResult;
   releasesCollected: number;
@@ -246,11 +257,12 @@ function randomUUID(source?: () => string): string {
 async function runClaimedCollection(
   input: RunCollectionInput,
   slotKey: string,
+  options: { claimTtlMs?: number; adapterDeadlineMs?: number } = {},
 ): Promise<CollectionAttemptOutcome> {
   const collectedAt = input.now.toISOString();
   const claimToken = randomUUID(input.randomUUID);
   const staleBefore = new Date(
-    input.now.getTime() - 15 * 60_000,
+    input.now.getTime() - (options.claimTtlMs ?? 15 * 60_000),
   ).toISOString();
   const claim = await input.repository.claimSlot(
     slotKey,
@@ -265,7 +277,8 @@ async function runClaimedCollection(
     };
   }
 
-  const collected = await collectWithLimit(input.adapters, (adapter) => adapter.collect(input.now), 8);
+  const collected = await collectWithLimit(input.adapters, (adapter) =>
+    collectBeforeDeadline(adapter,input.now,options.adapterDeadlineMs), 8);
   const enriched = enrichUndatedTuneResults(input.adapters, collected);
   const prepared = reconcileCollectedGroups(
     enriched.map((result, index) =>
@@ -328,6 +341,39 @@ async function runClaimedCollection(
   }
 
   return { state: collectionFailed ? "failed" : "current", summary };
+}
+
+async function collectBeforeDeadline(
+  adapter: ReleaseSourceAdapter,
+  now: Date,
+  deadlineMs?: number,
+): Promise<SourceCollectionResult> {
+  if (deadlineMs === undefined) return adapter.collect(now);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => adapter.collect(now)),
+      new Promise<never>((_resolve,reject) => {
+        timer=setTimeout(() => reject(new Error("Source collection timed out.")),deadlineMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+export function sourceRefreshSlotKey(sourceKey: string, now: Date): string {
+  return `refresh:v2:${collectionSlotKey(now)}:${sourceKey}`;
+}
+
+export async function runScheduledSourceCollection(
+  input: ScheduledSourceCollectionInput,
+): Promise<CollectionAttemptOutcome> {
+  return runClaimedCollection(
+    {repository:input.repository,adapters:[input.adapter],now:input.now,randomUUID:input.randomUUID},
+    sourceRefreshSlotKey(input.adapter.key,input.now),
+    {claimTtlMs:SOURCE_REFRESH_CLAIM_TTL_MS,adapterDeadlineMs:input.adapterDeadlineMs ?? SOURCE_REFRESH_ADAPTER_DEADLINE_MS},
+  );
 }
 
 export async function runCollection(

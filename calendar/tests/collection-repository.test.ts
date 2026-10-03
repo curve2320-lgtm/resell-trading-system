@@ -102,6 +102,19 @@ test("legacy channels backfill note and SKU without overwriting catalog edits", 
   assert.equal(cached.channels[0].releaseMethod,"앱 응모");
 });
 
+test("source refresh reads only the requested durable slot states",async()=>{
+  const repository=productionRepository(new SQLiteD1());
+  await repository.claimSlot("refresh:nike",t0,"nike-owner",collectedAt);
+  await repository.claimSlot("refresh:lego",t0,"lego-owner",collectedAt);
+  await repository.completeSlot("refresh:lego","lego-owner",t1);
+  assert.equal(typeof repository.listCollectionSlots,"function");
+  assert.deepEqual(await repository.listCollectionSlots!(["refresh:nike","refresh:lego","missing"]),[
+    {slotKey:"refresh:lego",status:"completed",startedAt:t0},
+    {slotKey:"refresh:nike",status:"running",startedAt:t0},
+  ]);
+  assert.deepEqual(await repository.listCollectionSlots!([]),[]);
+});
+
 function releaseGroup(
   release: CollectedRelease = baseRelease,
   reviewReason: ReleaseGroup["reviewReason"] = null,

@@ -23,6 +23,7 @@ import {
 import { safeAnnouncementUrl } from "./sns-links";
 import { expandedSourceCatalog } from "./expanded-sources";
 import { downloadReleaseCalendar, releaseCalendarEventCount } from "./release-calendar-export";
+import { createReleaseFeedLoader, releaseFeedCountLabel, type ReleaseCollectionState } from "./release-feed-loader";
 import {
   calendarDayCountLabel,
   effectiveScheduleMode,
@@ -785,12 +786,14 @@ function ScheduleTypeTabs({
   releases,
   value,
   onChange,
+  confirmed = true,
 }: {
   scope: string;
   label: string;
   releases: Release[];
   value: ScheduleMode;
   onChange: (mode: ScheduleMode) => void;
+  confirmed?: boolean;
 }) {
   const tabs: { value: ScheduleMode; label: string; count: number }[] = [
     {
@@ -828,7 +831,7 @@ function ScheduleTypeTabs({
           onClick={() => onChange(tab.value)}
         >
           <span>{tab.label}</span>
-          <strong>{tab.count}</strong>
+          <strong>{releaseFeedCountLabel(tab.count, confirmed)}</strong>
         </button>
       ))}
     </div>
@@ -844,8 +847,8 @@ function PeriodNavigation({
 }: {
   view: "today" | "calendar";
   dailyScope: DailyScope;
-  todayCount: number;
-  tomorrowCount: number;
+  todayCount: number | string;
+  tomorrowCount: number | string;
   onSelectDaily: (scope: DailyScope) => void;
 }) {
   const calendarView = view === "calendar";
@@ -1069,6 +1072,8 @@ export function ReleaseBoard({
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [sourceHealth, setSourceHealth] = useState<SourceHealth>({});
+  const [collectionState, setCollectionState] = useState<ReleaseCollectionState | null>(null);
+  const [feedError, setFeedError] = useState(false);
   const [clockIso, setClockIso] = useState(currentTimeIso);
   const [exportMessage, setExportMessage] = useState("");
 
@@ -1080,34 +1085,29 @@ export function ReleaseBoard({
   }, []);
 
   useEffect(() => {
-    let active = true;
-
     if (new URLSearchParams(window.location.search).get("demo") === "1") {
       setReleases(demoReleases);
       setLoadState("demo");
-      return () => {
-        active = false;
-      };
+      setFeedError(false);
+      return;
     }
-
-    setLoadState("loading");
-    fetch("/api/releases")
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((value: unknown) => {
-        if (!value || typeof value !== "object") throw new Error("Invalid release response");
-        const data = value as { releases?: Release[]; sources?: SourceHealth };
-        if (active && data.sources) setSourceHealth(data.sources);
-        if (active && Array.isArray(data.releases)) {
-          setReleases(data.releases);
-          setLoadState("live");
-        }
-      })
-      .catch(() => {
-        if (active) setLoadState("error");
-      });
-    return () => {
-      active = false;
-    };
+    setLoadState((previous) => previous === "live" ? previous : "loading");
+    const loader = createReleaseFeedLoader<Release, SourceHealth>({
+      request: fetch,
+      onResponse: (data) => {
+        if (data.sources) setSourceHealth(data.sources);
+        setReleases((previous) => data.collection.status === "failed" && data.releases.length === 0 && previous.length > 0 ? previous : data.releases);
+        setCollectionState(data.collection);
+        setFeedError(false);
+        setLoadState("live");
+      },
+      onError: () => {
+        setFeedError(true);
+        setLoadState((previous) => previous === "live" ? previous : "error");
+      },
+    });
+    loader.start();
+    return () => loader.stop();
   }, [demoReleases, reloadKey]);
 
   useEffect(() => {
@@ -1216,6 +1216,8 @@ export function ReleaseBoard({
   const autoSourceCount = Object.entries(sourceHealth).filter(
     ([key, health]) => key !== "database" && health?.status === "connected",
   ).length;
+  const schedulesConfirmed = isDemo || (loadState === "live" && collectionState?.status === "current" && !feedError);
+  const collectionFinishedWithErrors = collectionState?.status === "failed" && (collectionState.pendingSources ?? 0) === 0;
 
   function exportCalendar(scope: "month" | "saved") {
     try {
@@ -1346,17 +1348,17 @@ export function ReleaseBoard({
           <div className="metric-grid" aria-label="발매 현황 요약">
             <article>
               <span>오늘 발매</span>
-              <strong>{String(todayCount).padStart(2, "0")}</strong>
+              <strong>{releaseFeedCountLabel(todayCount, schedulesConfirmed, true)}</strong>
               <small>오늘 체크할 일정</small>
             </article>
             <article className="lime-card">
               <span>내일 일정</span>
-              <strong>{String(tomorrowReleases.length).padStart(2, "0")}</strong>
+              <strong>{releaseFeedCountLabel(tomorrowReleases.length, schedulesConfirmed, true)}</strong>
               <small>{tomorrowIso.slice(5).replace("-", ".")} 체크할 일정</small>
             </article>
             <article>
               <span>검수 필요</span>
-              <strong>{String(reviewCount).padStart(2, "0")}</strong>
+              <strong>{releaseFeedCountLabel(reviewCount, schedulesConfirmed, true)}</strong>
               <small>출처 확인 대기</small>
             </article>
           </div>
@@ -1397,6 +1399,23 @@ export function ReleaseBoard({
           </div>
         )}
         {exportMessage && <p className="saved-release-status" role="status">{exportMessage}</p>}
+        {loadState === "live" && !schedulesConfirmed && (
+          <div className="saved-release-status" role="status">
+            <span>
+              {collectionFinishedWithErrors
+                ? "최신 일정 확인을 마치지 못했습니다."
+                : feedError
+                  ? "연결이 잠시 끊겨 자동으로 다시 확인 중입니다."
+                  : "최신 일정을 업데이트 중입니다."}
+              {releases.length > 0
+                ? " 마지막으로 받은 일정을 표시하며, 빈 날짜는 아직 확인 중입니다."
+                : collectionFinishedWithErrors
+                  ? " 잠시 후 다시 확인해 주세요. 빈 날짜는 확정된 결과가 아닙니다."
+                  : " 확인이 완료되면 일정이 자동으로 표시됩니다."}
+            </span>
+            {collectionFinishedWithErrors && <button type="button" onClick={() => setReloadKey(value => value + 1)}>다시 확인 ↻</button>}
+          </div>
+        )}
         {savedUiAvailable && savedLoadState === "loading" && (
           <p className="saved-release-status" role="status">
             관심 발매 목록을 불러오는 중입니다…
@@ -1430,8 +1449,8 @@ export function ReleaseBoard({
         <PeriodNavigation
           view={view}
           dailyScope={dailyScope}
-          todayCount={todayReleases.length}
-          tomorrowCount={tomorrowReleases.length}
+          todayCount={releaseFeedCountLabel(todayReleases.length, schedulesConfirmed)}
+          tomorrowCount={releaseFeedCountLabel(tomorrowReleases.length, schedulesConfirmed)}
           onSelectDaily={setDailyScope}
         />
         <div className="workspace-head">
@@ -1477,6 +1496,8 @@ export function ReleaseBoard({
                 ? "연결 안 됨 — 새로고침 필요"
                 : loadState === "demo"
                   ? "연습용 데모 화면"
+                  : !schedulesConfirmed
+                    ? collectionFinishedWithErrors ? "최신 일정 확인 필요" : "최신 일정 업데이트 중"
                   : autoSourceCount > 0
                     ? `자동 연결 ${autoSourceCount}곳`
                     : "자체 등록 일정"}
@@ -1491,7 +1512,7 @@ export function ReleaseBoard({
             <div className="calendar-grid">
               {cells.map((cell) => {
                 const cellEvents = eventsByDate[cell.iso] ?? [];
-                const dayCountLabel = calendarDayCountLabel(
+                const dayCountLabel = cellEvents.length === 0 && !schedulesConfirmed && overseasOnly ? "—" : calendarDayCountLabel(
                   cellEvents.length,
                   overseasOnly,
                 );
@@ -1504,7 +1525,7 @@ export function ReleaseBoard({
                     className={`day-cell ${cell.outside ? "outside" : ""} ${isSelected ? "is-selected" : ""}`}
                     type="button"
                     onClick={() => focusReleaseDate(cell.iso, true, true)}
-                    aria-label={`${dateLabel(cell.iso)} ${cellEvents.length}건 ${isSelected ? "일정 접기" : "일정 펼치기"}`}
+                    aria-label={`${dateLabel(cell.iso)} ${cellEvents.length === 0 && !schedulesConfirmed ? "일정 확인 중" : `${cellEvents.length}건`} ${isSelected ? "일정 접기" : "일정 펼치기"}`}
                     aria-expanded={isSelected}
                     aria-controls="selected-day"
                   >
@@ -1530,7 +1551,7 @@ export function ReleaseBoard({
                 <h3>{dateLabel(selectedDate)}</h3>
               </div>
               <div className="day-panel-controls">
-                <strong>{selectedEvents.length}</strong>
+                <strong>{releaseFeedCountLabel(selectedEvents.length, schedulesConfirmed)}</strong>
                 <button
                   type="button"
                   onClick={() => setSelectedDayOpen(false)}
@@ -1547,6 +1568,7 @@ export function ReleaseBoard({
                 releases={selectedEvents}
                 value={effectiveCalendarScheduleMode}
                 onChange={setCalendarScheduleMode}
+                confirmed={schedulesConfirmed}
               />
             )}
             <div
@@ -1654,7 +1676,9 @@ export function ReleaseBoard({
                 <div className="empty-state">
                   <span>○</span>
                   <h4>
-                    {selectedEvents.length
+                    {!schedulesConfirmed
+                      ? collectionFinishedWithErrors ? "최신 일정 확인이 필요합니다." : "이 날짜의 최신 일정을 확인 중입니다…"
+                      : selectedEvents.length
                       ? `이 날짜에는 ${scheduleModeLabel(effectiveCalendarScheduleMode)} 일정이 없습니다`
                       : selectedDayEmptyCopy(
                           overseasOnly,
@@ -1663,7 +1687,9 @@ export function ReleaseBoard({
                         )}
                   </h4>
                   <p>
-                    {selectedEvents.length
+                    {!schedulesConfirmed
+                      ? "빈 날짜를 아직 일정 없음으로 확정하지 않았습니다. 확인한 일정이 여기에 표시됩니다."
+                      : selectedEvents.length
                       ? "옆 탭을 누르면 다른 유형의 일정을 확인할 수 있습니다."
                       : "관리자 등록 또는 연결된 출처 확인 후 이 날짜에 표시됩니다."}
                   </p>
@@ -1841,8 +1867,8 @@ export function ReleaseBoard({
           <PeriodNavigation
             view={view}
             dailyScope={dailyScope}
-            todayCount={todayReleases.length}
-            tomorrowCount={tomorrowReleases.length}
+            todayCount={releaseFeedCountLabel(todayReleases.length, schedulesConfirmed)}
+            tomorrowCount={releaseFeedCountLabel(tomorrowReleases.length, schedulesConfirmed)}
             onSelectDaily={setDailyScope}
           />
           <div className="section-title-row">
@@ -1854,7 +1880,7 @@ export function ReleaseBoard({
               </span>
               <h2>{dailyScope === "today" ? "오늘 일정" : "내일 일정"}</h2>
             </div>
-            <span>{activeDailyReleases.length} ITEMS</span>
+            <span>{releaseFeedCountLabel(activeDailyReleases.length, schedulesConfirmed)} ITEMS</span>
           </div>
           <ScheduleTypeTabs
             scope="daily-schedule"
@@ -1862,6 +1888,7 @@ export function ReleaseBoard({
             releases={activeDailyReleases}
             value={activeDailyMode}
             onChange={changeDailyScheduleMode}
+            confirmed={schedulesConfirmed}
           />
           <div className="kream-guide">
             <strong>💡 유과장 한마디</strong>
@@ -1965,11 +1992,14 @@ export function ReleaseBoard({
               </article>
               );
             })}
-            {visibleDailyReleases.length === 0 && loadState === "loading" && (
+            {visibleDailyReleases.length === 0 && loadState !== "error" && !schedulesConfirmed && (
               <div className="today-empty">
                 <span>확인 중</span>
-                <h3>오늘 일정을 불러오고 있습니다…</h3>
-                <p>공식 출처를 확인하는 데 몇 초 걸릴 수 있습니다. 잠시만 기다려 주세요.</p>
+                <h3>{dailyScope === "today" ? "오늘" : "내일"} 최신 일정을 {collectionFinishedWithErrors ? "확인하지 못했습니다." : "확인 중입니다…"}</h3>
+                <p>{collectionFinishedWithErrors
+                  ? "마지막으로 받은 데이터에서 이 날짜의 일정을 찾지 못했습니다. 최신 일정이 없는 것으로 확정하지 않았습니다."
+                  : "수집이 끝나면 자동으로 표시됩니다. 현재 빈 목록은 확인 중인 상태입니다."}</p>
+                {collectionFinishedWithErrors && <button className="retry-button" type="button" onClick={() => setReloadKey(value => value + 1)}>다시 확인 ↻</button>}
               </div>
             )}
             {visibleDailyReleases.length === 0 && loadState === "error" && (
@@ -1977,8 +2007,7 @@ export function ReleaseBoard({
                 <span>연결 안 됨</span>
                 <h3>일정을 불러오지 못했습니다.</h3>
                 <p>
-                  인터넷 연결을 확인한 뒤 아래 버튼을 눌러 주세요. 계속 안 되면
-                  잠시 후 다시 열어 보세요.
+                  연결을 자동으로 다시 확인하고 있습니다. 아래 버튼으로 바로 다시 불러올 수도 있습니다.
                 </p>
                 <button
                   className="retry-button"
@@ -1990,8 +2019,7 @@ export function ReleaseBoard({
               </div>
             )}
             {visibleDailyReleases.length === 0 &&
-              loadState !== "loading" &&
-              loadState !== "error" && (
+              schedulesConfirmed && (
               <div className="today-empty">
                 <span>
                   {scheduleModeLabel(activeDailyMode)}
@@ -2021,7 +2049,7 @@ export function ReleaseBoard({
               <small>DATE TO BE ANNOUNCED</small>
               <b>날짜 미정 공지</b>
             </span>
-            <strong>{undatedCount}</strong>
+            <strong>{releaseFeedCountLabel(undatedCount, schedulesConfirmed)}</strong>
           </summary>
           <div className="support-panel-body">
           <p className="section-description">

@@ -23,3 +23,6 @@ import "./instagram-adapter.test.ts";
 import "./release-calendar-export.test.ts";
 import "./lifestyle-adapters.test.ts";
 import "./overseas-identity.test.ts";
+import "./source-refresh.test.ts";
+import "./release-feed-loader.test.ts";
+import "./cached-release-api.test.ts";

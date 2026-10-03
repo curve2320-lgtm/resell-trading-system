@@ -1,10 +1,11 @@
 import {
+  createCollectionRepository,
   readReleaseApiPayload,
   type ReleaseApiPayload,
 } from "./repository.ts";
-import { configuredReleaseSourceKeys } from "./registry.ts";
+import { configuredReleaseSourceKeys, enabledReleaseSourceAdapters } from "./registry.ts";
+import { startReleaseRefreshBatch, type ReleaseRefreshContext } from "./refresh.ts";
 import {
-  ensureCurrentSlotCollected,
   type CollectionAttemptOutcome,
 } from "./run.ts";
 
@@ -17,6 +18,7 @@ const CACHE_ERROR_MESSAGE = "Release cache is temporarily unavailable.";
 export type ReleaseCollectionContext = {
   status: "current" | "stale" | "failed";
   message: string | null;
+  pendingSources?: number;
 };
 
 export type ReleaseApiResponsePayload = ReleaseApiPayload & {
@@ -115,13 +117,58 @@ export function createReleaseGetHandler(
   };
 }
 
+export type CachedReleaseGetDependencies = {
+  startRefresh(): Promise<ReleaseRefreshContext>;
+  readReleaseApiPayload(): Promise<ReleaseApiPayload>;
+  configuredSourceKeys: readonly string[];
+};
+
+/** Refresh registration only awaits durable slot reads, never upstream collection. */
+export function createCachedReleaseGetHandler(
+  dependencies: CachedReleaseGetDependencies,
+): () => Promise<Response> {
+  return async () => {
+    let collection: ReleaseRefreshContext;
+    try {
+      collection = await dependencies.startRefresh();
+    } catch (error) {
+      collection = {
+        status: "failed",
+        message: publicCollectionErrorMessage(error),
+        pendingSources: 0,
+      };
+    }
+    let payload: ReleaseApiPayload;
+    try {
+      payload = await dependencies.readReleaseApiPayload();
+    } catch {
+      return Response.json({ error: CACHE_ERROR_MESSAGE }, {
+        status: 500, headers: { "Cache-Control": "no-store" },
+      });
+    }
+    const unavailable = payload.releases.length === 0 && (
+      collection.status === "failed" || (
+        collection.status === "current" &&
+        allConfiguredSourcesFailed(payload, dependencies.configuredSourceKeys)
+      )
+    );
+    return Response.json({ ...payload, collection } satisfies ReleaseApiResponsePayload, {
+      status: unavailable ? 503 : 200,
+      headers: collection.status === "current" && !unavailable
+        ? CACHE_HEADERS : { "Cache-Control": "no-store" },
+    });
+  };
+}
+
 export async function releaseGetResponse(): Promise<Response> {
   const sourceKeys = configuredReleaseSourceKeys();
-  const handler = createReleaseGetHandler({
-    ensureCurrentSlotCollected,
-    readReleaseApiPayload: () =>
-      readReleaseApiPayload(undefined, sourceKeys),
+  const repository = createCollectionRepository();
+  const { waitUntil } = await import("cloudflare:workers");
+  return createCachedReleaseGetHandler({
+    startRefresh: () => startReleaseRefreshBatch({
+      repository, adapters: enabledReleaseSourceAdapters(), now: new Date(), waitUntil,
+    }),
+    readReleaseApiPayload: () => readReleaseApiPayload(repository, sourceKeys),
     configuredSourceKeys: sourceKeys,
-  });
-  return handler();
+  })();
 }

@@ -48,7 +48,14 @@ export type SlotClaimOutcome =
   | { state: "completed" }
   | { state: "failed" };
 
+export type CollectionSlotSnapshot = {
+  slotKey: string;
+  status: "running" | "completed" | "failed";
+  startedAt: string;
+};
+
 export interface CollectionRepository {
+  listCollectionSlots?(slotKeys: readonly string[]): Promise<CollectionSlotSnapshot[]>;
   claimSlot(
     slotKey: string,
     startedAt: string,
@@ -1472,6 +1479,19 @@ function currentSlotOutcome(
 
 function createRepository(provider: CollectionDbProvider): CollectionRepository {
   return {
+    async listCollectionSlots(slotKeys) {
+      if (slotKeys.length === 0) return [];
+      const db = await provider();
+      const result: CollectionSlotSnapshot[] = [];
+      for (const keys of chunksOf([...new Set(slotKeys)], D1_MAX_BOUND_PARAMETERS)) {
+        const rows = await db.select({slotKey:collectionSlots.slotKey,status:collectionSlots.status,startedAt:collectionSlots.startedAt})
+          .from(collectionSlots).where(inArray(collectionSlots.slotKey,keys)).orderBy(asc(collectionSlots.slotKey));
+        for (const row of rows) {
+          if (row.status === "running" || row.status === "completed" || row.status === "failed") result.push({...row,status:row.status});
+        }
+      }
+      return result;
+    },
     async claimSlot(slotKey, startedAt, claimToken, staleBefore) {
       const db = await provider();
       const claimed = await db
