@@ -1,0 +1,130 @@
+{
+  "products": [
+    {
+      "id": 810001,
+      "title": "ASICS GEL-KAYANO 14 Cream",
+      "handle": "asics-gel-kayano-14-cream",
+      "vendor": "ASICS",
+      "product_type": "Sneakers",
+      "tags": ["RAFFLE", "LIMITED"],
+      "published_at": "2026-07-30T12:00:00+09:00",
+      "body_html": "<p>Style Code: 1203B186-100</p><p>응모 일정은 공식 캘린더에서 확인해 주세요.</p>",
+      "variants": [
+        {
+          "id": 820001,
+          "title": "270",
+          "sku": "1203B186-100-270",
+          "price": "189000.00",
+          "available": true
+        }
+      ],
+      "images": [
+        {
+          "id": 830001,
+          "src": "https://cdn.shopify.com/s/files/tune-asics.jpg"
+        }
+      ]
+    },
+    {
+      "id": 810002,
+      "title": "SALOMON XT-WHISPER",
+      "handle": "salomon-xt-whisper",
+      "vendor": "SALOMON",
+      "product_type": "Sneakers",
+      "tags": ["NEW ARRIVAL"],
+      "published_at": "2026-07-31T12:00:00+09:00",
+      "body_html": "<p>Style Code: L47870800</p><p>발매 일정은 추후 공개됩니다.</p>",
+      "variants": [
+        {
+          "id": 820002,
+          "title": "260",
+          "sku": "L47870800-260",
+          "price": "210000.00",
+          "available": true
+        }
+      ],
+      "images": [
+        {
+          "id": 830002,
+          "src": "https://cdn.shopify.com/s/files/tune-salomon.jpg"
+        }
+      ]
+    },
+    {
+      "id": 810003,
+      "title": "TUNE RECENT CORE CATALOG ITEM",
+      "handle": "tune-recent-core-catalog-item",
+      "vendor": "TUNE",
+      "product_type": "Sneakers",
+      "tags": ["CORE"],
+      "published_at": "2026-07-31T12:00:00+09:00",
+      "body_html": "<p>Style Code: CORE2026001</p>",
+      "variants": [
+        {
+          "id": 820003,
+          "sku": "CORE2026001-270",
+          "price": "99000.00",
+          "available": true
+        }
+      ],
+      "images": []
+    },
+    {
+      "id": 810004,
+      "title": "TUNE OLD LIMITED RELEASE",
+      "handle": "tune-old-limited-release",
+      "vendor": "TUNE",
+      "product_type": "Sneakers",
+      "tags": ["LIMITED"],
+      "published_at": "2025-01-10T12:00:00+09:00",
+      "body_html": "<p>Style Code: OLD2025001</p>",
+      "variants": [
+        {
+          "id": 820004,
+          "sku": "OLD2025001-270",
+          "price": "99000.00",
+          "available": true
+        }
+      ],
+      "images": []
+    },
+    {
+      "id": 810005,
+      "title": "TUNE LIMITED GIFT CARD",
+      "handle": "tune-limited-gift-card",
+      "vendor": "TUNE",
+      "product_type": "Gift Card",
+      "tags": ["LIMITED"],
+      "published_at": "2026-07-31T12:00:00+09:00",
+      "body_html": "<p>Style Code: GIFT2026001</p>",
+      "variants": [
+        {
+          "id": 820005,
+          "sku": "GIFT2026001",
+          "price": "50000.00",
+          "available": true
+        }
+      ],
+      "images": []
+    },
+    {
+      "id": 810006,
+      "title": "TUNE STYLE PENDING LIMITED SHOE",
+      "handle": "tune-style-pending-limited-shoe",
+      "vendor": "TUNE",
+      "product_type": "Shoes",
+      "tags": ["LIMITED RELEASE"],
+      "published_at": "2026-07-31T12:00:00+09:00",
+      "body_html": "<p>스타일 코드는 추후 공개됩니다.</p>",
+      "variants": [
+        {
+          "id": 820006,
+          "sku": "",
+          "price": "179000.00",
+          "available": true
+        }
+      ],
+      "images": []
+    }
+  ]
+}

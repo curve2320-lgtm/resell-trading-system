@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["next-env.d.ts", "cloudflare-env.d.ts", "app/**/*.ts", "app/**/*.tsx", "db/**/*.ts", "worker/**/*.ts", "build/**/*.ts", "vite.config.ts"],
+  "exclude": ["node_modules", "tests", "dist"]
+}

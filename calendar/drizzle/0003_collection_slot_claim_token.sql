@@ -1,0 +1,1 @@
+ALTER TABLE `collection_slots` ADD `claim_token` text;

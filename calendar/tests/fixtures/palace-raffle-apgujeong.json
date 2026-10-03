@@ -1,0 +1,17 @@
+{
+  "code": "SUCCESS",
+  "payload": [
+    {
+      "id": 210,
+      "waitingStoreId": 1,
+      "status": "READY",
+      "visible": true,
+      "visibleFrom": "2026-08-11T14:00:00",
+      "visibleUntil": "2026-08-12T17:00:00",
+      "eventFrom": "2026-08-12T14:00:00",
+      "eventUntil": "2026-08-12T16:00:00",
+      "reservationDay": "2026-08-15",
+      "raffleStoreReservations": [{ "id": 210, "reservationTime": "ALL DAY" }]
+    }
+  ]
+}

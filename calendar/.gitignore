@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+.wrangler/
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.log
+.worktrees/
+*.tsbuildinfo
+

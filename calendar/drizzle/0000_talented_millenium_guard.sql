@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `releases` (
+	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	`external_id` text,
+	`title` text NOT NULL,
+	`brand` text NOT NULL,
+	`category` text NOT NULL,
+	`release_date` text NOT NULL,
+	`release_time` text,
+	`channel` text NOT NULL,
+	`source_name` text NOT NULL,
+	`source_url` text,
+	`status` text NOT NULL,
+	`confidence` integer NOT NULL,
+	`note` text NOT NULL,
+	`is_featured` integer NOT NULL,
+	`created_by` text,
+	`retailer` text,
+	`release_method` text,
+	`price_label` text,
+	`style_code` text,
+	`product_url` text
+);

@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1785444146392,
+      "tag": "0000_talented_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1785449045039,
+      "tag": "0001_collaboration_release_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785453075789,
+      "tag": "0002_handy_wendigo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785504725678,
+      "tag": "0003_collection_slot_claim_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791051437453,
+      "tag": "0004_channel_schedule_metadata",
+      "breakpoints": true
+    }
+  ]
+}
