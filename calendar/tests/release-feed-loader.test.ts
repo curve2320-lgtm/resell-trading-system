@@ -26,6 +26,16 @@ const settle = async () => { for (let index = 0; index < 12; index++) await Prom
 const payload = (status: "stale" | "current" = "stale", releases: unknown[] = []) =>
   Response.json({ releases, sources: { database: { count: releases.length } }, collection: { status, message: status === "stale" ? "in progress" : null } });
 
+test("the request callback is unbound so native browser fetch has no invalid receiver", async () => {
+  const timer = clock(); let received = 0;
+  const loader = createReleaseFeedLoader({
+    request: async function(this: unknown) { assert.equal(this, undefined); return payload("current"); },
+    onResponse: () => { received++; }, onError: () => assert.fail("invalid request receiver"),
+    schedule: timer.schedule, cancel: timer.cancel,
+  });
+  loader.start(); await settle(); assert.equal(received, 1); loader.stop();
+});
+
 test("stale cached data polls after four seconds and stops once current", async () => {
   const timer = clock();
   const received: unknown[] = [];

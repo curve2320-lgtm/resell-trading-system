@@ -48,6 +48,8 @@ function parsePayload<TRelease, TSourceHealth>(value: unknown): ReleaseFeedPaylo
 
 /** A pending collection keeps polling; successful cached responses never get replaced by a failure. */
 export function createReleaseFeedLoader<TRelease = unknown, TSourceHealth = unknown>(options: LoaderOptions<TRelease, TSourceHealth>) {
+  // Native browser fetch must not receive our options object as its receiver.
+  const request = options.request;
   const schedule = options.schedule ?? ((callback, delay) => setTimeout(callback, delay));
   const cancel = options.cancel ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   let started = false;
@@ -75,7 +77,7 @@ export function createReleaseFeedLoader<TRelease = unknown, TSourceHealth = unkn
     try {
       const response = await Promise.race([
         (async () => {
-          const result = await options.request("/api/releases", { signal, cache: "no-store" });
+          const result = await request("/api/releases", { signal, cache: "no-store" });
           if (!result.ok && result.status !== 503) throw new Error("Release request failed");
           const payload = parsePayload<TRelease, TSourceHealth>(await result.json());
           if (!result.ok && !(payload.collection.status === "failed" && payload.collection.pendingSources === 0)) {
