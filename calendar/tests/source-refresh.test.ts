@@ -154,21 +154,21 @@ test("refresh job deadlines settle the retained background batch even when adapt
 
 test("monthly jobs retain the canonical source and progress one month per source",async()=>{
   const {startReleaseRefreshBatch}=await import("../app/collection/refresh.ts");
-  const repo=repository(),started:string[]=[],adapters=["2026-09","2026-08"].map(month=>({...adapter("sibna",async()=>{started.push(month);return response("sibna");}),collectionKey:`sibna:calendar:${month}`,refreshInterval:"weekly" as const}));
+  const repo=repository(),started:string[]=[],adapters=["2026-09","2026-08"].map(month=>({...adapter("officialCalendar",async()=>{started.push(month);return response("officialCalendar");}),collectionKey:`officialCalendar:calendar:${month}`,refreshInterval:"weekly" as const}));
   for(let index=0;index<2;index++){
     const background:Promise<unknown>[]=[];
     const context=await startReleaseRefreshBatch({repository:repo.result,adapters,now:new Date(now.getTime()+index*1000),waitUntil:job=>{background.push(job);}});
     assert.equal(context.pendingSources,2-index);await background[0];
   }
   assert.deepEqual(started,["2026-09","2026-08"]);
-  assert.deepEqual(repo.persisted.map(value=>value.sourceKey),["sibna","sibna"]);
+  assert.deepEqual(repo.persisted.map(value=>value.sourceKey),["officialCalendar","officialCalendar"]);
   assert.equal(new Set(repo.claims.map(value=>value.slotKey)).size,2);
 });
 
 test("a fresh held month prevents another job from writing the same source",async()=>{
   const {startReleaseRefreshBatch}=await import("../app/collection/refresh.ts");
-  const first={...adapter("sibna"),collectionKey:"sibna:calendar:2026-09",refreshInterval:"weekly" as const};
-  const second={...adapter("sibna"),collectionKey:"sibna:calendar:2026-08",refreshInterval:"weekly" as const};
+  const first={...adapter("officialCalendar"),collectionKey:"officialCalendar:calendar:2026-09",refreshInterval:"weekly" as const};
+  const second={...adapter("officialCalendar"),collectionKey:"officialCalendar:calendar:2026-08",refreshInterval:"weekly" as const};
   const key=collectionRun.sourceRefreshSlotKey(first.key,now,first);
   const repo=repository([{slotKey:key,status:"running",startedAt:now.toISOString()}]);let registered=0;
   const context=await startReleaseRefreshBatch({repository:repo.result,adapters:[first,second],now,waitUntil:()=>{registered++;}});
@@ -176,24 +176,24 @@ test("a fresh held month prevents another job from writing the same source",asyn
 });
 
 test("historic monthly jobs refresh weekly while live sources keep daily collection slots",()=>{
-  const metadata={collectionKey:"sibna:calendar:2026-09",refreshInterval:"weekly" as const};
-  assert.equal(collectionRun.sourceRefreshSlotKey("sibna",now,metadata),collectionRun.sourceRefreshSlotKey("sibna",new Date("2026-10-04T13:00:00Z"),metadata));
-  assert.notEqual(collectionRun.sourceRefreshSlotKey("sibna",now,metadata),collectionRun.sourceRefreshSlotKey("sibna",new Date("2026-10-12T02:00:00Z"),metadata));
+  const metadata={collectionKey:"officialCalendar:calendar:2026-09",refreshInterval:"weekly" as const};
+  assert.equal(collectionRun.sourceRefreshSlotKey("officialCalendar",now,metadata),collectionRun.sourceRefreshSlotKey("officialCalendar",new Date("2026-10-04T13:00:00Z"),metadata));
+  assert.notEqual(collectionRun.sourceRefreshSlotKey("officialCalendar",now,metadata),collectionRun.sourceRefreshSlotKey("officialCalendar",new Date("2026-10-12T02:00:00Z"),metadata));
   assert.notEqual(collectionRun.sourceRefreshSlotKey("nike",now),collectionRun.sourceRefreshSlotKey("nike",new Date("2026-10-04T13:00:00Z")));
 });
 
 test("a failed historic month retries after five minutes instead of waiting a week",async()=>{
   const {startReleaseRefreshBatch}=await import("../app/collection/refresh.ts");
-  const monthly={...adapter("sibna"),collectionKey:"sibna:calendar:2026-09",refreshInterval:"weekly" as const};
-  const repo=repository([{slotKey:collectionRun.sourceRefreshSlotKey("sibna",now,monthly),status:"failed",startedAt:new Date(now.getTime()-5*60_000).toISOString()}]);
+  const monthly={...adapter("officialCalendar"),collectionKey:"officialCalendar:calendar:2026-09",refreshInterval:"weekly" as const};
+  const repo=repository([{slotKey:collectionRun.sourceRefreshSlotKey("officialCalendar",now,monthly),status:"failed",startedAt:new Date(now.getTime()-5*60_000).toISOString()}]);
   const background:Promise<unknown>[]=[];
   const context=await startReleaseRefreshBatch({repository:repo.result,adapters:[monthly],now,waitUntil:job=>background.push(job)});
   assert.equal(context.pendingSources,1);await background[0];assert.equal(repo.persisted.length,1);
 });
 
-test("manual source collection shares the canonical monthly lease",async()=>{
+test("manual source collection respects a declared scoped adapter lease",async()=>{
   const repo=repository();let collected=0;
   repo.result.claimSourceRefreshLock=async()=>false;
-  const summary=await collectionRun.runSourceCollection({repository:repo.result,adapters:[adapter("sibna",async()=>{collected++;return response("sibna");})],sourceKey:"sibna",now});
+  const summary=await collectionRun.runSourceCollection({repository:repo.result,adapters:[{...adapter("officialCalendar",async()=>{collected++;return response("officialCalendar");}),collectionKey:"officialCalendar:calendar:2026-09"}],sourceKey:"officialCalendar",now});
   assert.equal(collected,0);assert.equal(repo.persisted.length,0);assert.equal(summary.sourcesRun,0);
 });

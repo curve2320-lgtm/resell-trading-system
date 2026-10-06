@@ -132,25 +132,15 @@ function structured(html:string,source:ExpandedSource,now:Date):ExpandedParseRes
     return [expandedInput(source,now,{externalId:stringValue(row.sku)??url,title,brand:brand??source.label,releaseDate:schedule?.date??"",releaseTime:schedule?.time??null,styleCode:stringValue(row.sku),productUrl:url,sourceUrl:url,priceLabel:isRecord(offers)&&offers.price?`${offers.priceCurrency??""} ${offers.price}`.trim():null})];
   });return {recognized:records.length>0,releases,malformed};
 }
-const GOODS=/나이키|nike|조던|jordan|아디다스|adidas|뉴발란스|new balance|아식스|asics|살로몬|salomon|스니커|신발|운동화|슈프림|supreme|스투시|stussy|팔라스|palace|휴먼메이드|human\s?made|IAB|노아|noah|kith|반스|vans|컨버스|converse|온러닝|온더스팟|무신사|29CM|카시나|웍스아웃|포켓몬|pokemon|레고|lego|굿즈|키링|키캡|피규어|베어브릭|시계|스타벅스|라인프렌즈|국립박물관|단청|색동/iu;
-function sibna(html:string,source:ExpandedSource,now:Date):ExpandedParseResult {
-  const panel=expandedScriptJson(html,"calendarPanelData");if(!isRecord(panel))return empty();const byId=new Map<string,AdapterReleaseInput>();let malformed=0;
-  for(const [date,day]of Object.entries(panel).sort(([a],[b])=>a.localeCompare(b))){if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!isRecord(day)||!Array.isArray(day.items))continue;
-    for(const row of day.items){if(!isRecord(row)){malformed++;continue;}const title=stringValue(row.title),url=expandedSafeUrl(row.url,source),key=String(row.id);if(!title||!url){malformed++;continue;}if(byId.has(key)||row.method==="경제"||!GOODS.test(title)||/쿠폰|할인|세금|경제|영화|버거|치킨|KFC|맥도날드|증시|지수|환율|카드혜택/iu.test(title))continue;
-      const time=stringValue(row.time)?.match(/^(\d{1,2}):(\d{2})$/),period=stringValue(row.time)?.match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})\s*[~～]/),start=period?validReleaseDay(+date.slice(0,4),+period[1],+period[2]):null;
-      byId.set(key,expandedInput(source,now,{externalId:`sibna:${key}`,title,brand:null,releaseDate:start??date,releaseTime:time?`${time[1].padStart(2,"0")}:${time[2]}`:period?`${period[3].padStart(2,"0")}:${period[4]}`:null,sourceUrl:url,productUrl:url,...(row.method==="응모"?{releaseKindHint:"raffle" as const}:{})}));
-    }
-  }return {recognized:true,releases:[...byId.values()],malformed};
-}
 export function parseExpandedSource(html:string,source:ExpandedSource,now:Date):ExpandedParseResult {
   if(source.key==="lego")return parseLegoAnnouncements(html,source,now);
   if(source.key==="starbucks"){try{return parseStarbucksAnnouncements(JSON.parse(html),source,now);}catch{return empty();}}
   if(source.parser==="atom")return /<feed\b[\s\S]*<\/feed>/i.test(html)?{recognized:true,releases:announcements(html,source,now).map((entry)=>articleRelease(entry,source,now)),malformed:0}:empty();
-  return {atmos,end,slamjam,structured,sibna}[source.parser](html,source,now);
+  return {atmos,end,slamjam,structured}[source.parser](html,source,now);
 }
 export function createExpandedAdapter(source:ExpandedSource,fetchText=fetchSourceText):ReleaseSourceAdapter {
   return {key:source.key,retailer:source.label,allowedDomains:source.domains,async collect(now):Promise<SourceCollectionResult>{
-    try{const url=source.key==="sibna"?`${source.url}?month=${seoulDateTime(now)!.date.slice(0,7)}`:source.feedUrl??source.url;
+    try{const url=source.feedUrl??source.url;
       let text:string;
       if(source.key==="starbucks"){
         const payload=await fetchSourceJson("https://www.starbucks.co.kr/whats_new/newsListAjax.do",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded",Referer:source.url},body:"cate=N01&pageIndex=1&searchKeyword=&searchKey=3"});

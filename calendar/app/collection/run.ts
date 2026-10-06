@@ -261,7 +261,7 @@ async function runClaimedCollection(
   options: { claimTtlMs?: number; adapterDeadlineMs?: number; retryFailedAfterMs?: number } = {},
 ): Promise<CollectionAttemptOutcome> {
   const locks: Array<{sourceKey:string;token:string}> = [];
-  const scopedSources=[...new Set(input.adapters.filter(adapter=>adapter.key === "sibna" || adapter.collectionKey).map(({key})=>key))];
+  const scopedSources=[...new Set(input.adapters.filter(adapter=>adapter.collectionKey).map(({key})=>key))];
   try {
     if (input.repository.claimSourceRefreshLock) for (const sourceKey of scopedSources) {
       const token=randomUUID(input.randomUUID);
@@ -386,7 +386,7 @@ async function collectBeforeDeadline(
 
 export function sourceRefreshSlotKey(sourceKey: string, now: Date, metadata: Pick<ReleaseSourceAdapter,"collectionKey"|"refreshInterval"> = {}): string {
   // Retry a corrected parser within the current slot without rerunning other sources.
-  const revision = sourceKey === "shoeprize" ? "v4" : sourceKey === "sibna" || sourceKey === "sns" || sourceKey === "instagramPublic" ? "v3" : "v2";
+  const revision = sourceKey === "shoeprize" ? "v4" : sourceKey === "sns" || sourceKey === "instagramPublic" || sourceKey === "museumShop" || sourceKey === "pokemonCard" ? "v3" : "v2";
   let period = collectionSlotKey(now);
   if (metadata.refreshInterval === "weekly") {
     const seoulDay = new Date(`${seoulDayFormatter.format(now)}T00:00:00Z`);

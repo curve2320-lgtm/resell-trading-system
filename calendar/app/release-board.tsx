@@ -1668,7 +1668,7 @@ export function ReleaseBoard({
                           통합 발매 정보 마지막 확인 ·{" "}
                           {release.lastVerifiedLabel ?? "확인 시각 미정"}
                         </span>
-                        <span className={release.confidence < 80 ? "low-confidence" : ""}>{release.sourceName === "sibna" ? "SIBNA 공개 일정" : `신뢰도 ${release.confidence}%`}</span>
+                        <span className={release.confidence < 80 ? "low-confidence" : ""}>{`신뢰도 ${release.confidence}%`}</span>
                       </footer>
                     </div>
                   </details>

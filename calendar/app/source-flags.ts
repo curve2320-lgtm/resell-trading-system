@@ -9,6 +9,8 @@
  *   RELEASE_SOURCES_ON="..."              // 코드 기본값(DEFAULT_OFF)으로 꺼 둔 출처를 켤 때만 사용
  */
 
+import {isRetiredReleaseSource} from "./collection/source-policy.ts";
+
 export type ReleaseSourceKey =
   | "nike"
   | "adidas"
@@ -42,6 +44,7 @@ function envList(name: string): string[] {
 }
 
 export function sourceEnabled(key: string): boolean {
+  if (isRetiredReleaseSource(key)) return false;
   const normalized = key.toLowerCase();
   if (envList("RELEASE_SOURCES_OFF").includes(normalized)) return false;
   if (envList("RELEASE_SOURCES_ON").includes(normalized)) return true;

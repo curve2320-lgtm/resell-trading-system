@@ -7,7 +7,7 @@ import {
 } from "./run.ts";
 
 const REFRESH_BATCH_SIZE = 4;
-const SOURCE_PRIORITY = ["nike", "lego", "atmosJP", "shoeprize", "sibna", "instagramPublic"];
+const SOURCE_PRIORITY = ["nike", "onepieceCard", "pokemonCard", "museumShop", "lego", "atmosJP", "shoeprize", "instagramPublic"];
 
 export type ReleaseRefreshContext = {
   status: "current" | "stale" | "failed";

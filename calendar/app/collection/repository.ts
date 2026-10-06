@@ -41,6 +41,7 @@ import type {
 import { safeAnnouncementUrl, isInstagramSource } from "../sns-links.ts";
 import { safeRetailerUrl } from "../release-links.ts";
 import { expandedSourceCatalog, expandedSourceRegion } from "../expanded-sources.ts";
+import {isRetiredReleaseSource, isRetiredReleaseChannel} from "./source-policy.ts";
 
 export type SlotClaimOutcome =
   | { state: "claimed"; claimToken: string; reclaimed: boolean }
@@ -569,6 +570,7 @@ function isNullableString(value: unknown): value is string | null {
 
 function pendingUndatedItem(review: ReviewItem): ReleaseApiUndatedItem | null {
   if (
+    isRetiredReleaseSource(review.sourceKey) ||
     review.status !== "pending" ||
     review.reason !== "missing_date"
   ) {
@@ -581,6 +583,7 @@ function pendingUndatedItem(review: ReviewItem): ReleaseApiUndatedItem | null {
     const release = (payload as { release?: unknown }).release;
     if (typeof release !== "object" || release === null) return null;
     const candidate = release as Record<string, unknown>;
+    if (isRetiredReleaseChannel(candidate as {sourceKey:string;sourceUrl?:string;productUrl?:string})) return null;
     if (
       candidate.sourceKey !== review.sourceKey ||
       typeof candidate.externalId !== "string" ||
@@ -618,7 +621,7 @@ export async function readReleaseApiPayload(
   configuredSourceKeys: readonly string[] = [],
 ): Promise<ReleaseApiPayload> {
   const [
-    cachedReleases,
+    rawCachedReleases,
     sourceHealth,
     pendingReviewCount,
     pendingUndatedReviews,
@@ -630,6 +633,12 @@ export async function readReleaseApiPayload(
       ? repository.listPendingUndatedReviews()
       : repository.listPendingNikeMissingDateReviews(),
   ]);
+  const cachedReleases = rawCachedReleases.flatMap((release) => {
+    const channels = release.channels.filter(channel=>!isRetiredReleaseChannel(channel));
+    if (!channels.length) return [];
+    if (channels.length === release.channels.length) return [release];
+    return [{...release,channels,releaseDate:channels[0].releaseDate,releaseTime:channels[0].releaseTime}];
+  });
   const undatedBySource = new Map<string, ReleaseApiUndatedItem[]>();
   for (const review of pendingUndatedReviews.slice(0, 200)) {
     const item = pendingUndatedItem(review);
@@ -650,13 +659,13 @@ export async function readReleaseApiPayload(
   };
 
   const publicSourceKeys = [
-    ...new Set([...configuredSourceKeys, "nike", ...undatedBySource.keys()]),
+    ...new Set([...configuredSourceKeys, "nike", ...undatedBySource.keys()].filter(key=>!isRetiredReleaseSource(key))),
   ];
   for (const sourceKey of publicSourceKeys) {
     const health = healthBySource.get(sourceKey);
     sources[sourceKey] = {
       status: health?.status ?? "unknown",
-      count: sourceKey === "sibna" ? new Set(cachedReleases.flatMap(({channels})=>channels.filter(channel=>channel.sourceKey === sourceKey).map(channel=>channel.externalId ?? channel.sourceUrl))).size : health?.sourceCount ?? 0,
+      count: health?.sourceCount ?? 0,
       message: health?.message ?? "Collection has not run yet.",
       sourceUrl: SOURCE_URLS[sourceKey],
       ...(sourceKey === "nike" || undatedBySource.has(sourceKey)
@@ -682,6 +691,17 @@ async function runBatch(
   );
 }
 
+/** Free identities owned only by the removed reference, preserving IDs and saved foreign keys. */
+async function retireReferenceCatalogKeys(db: CollectionDb): Promise<void> {
+  await db.run(sql`update ${releaseCatalog}
+    set canonical_key = 'retired-reference:sibna:' || id, status = 'retired'
+    where canonical_key not like 'retired-reference:sibna:%'
+      and exists (select 1 from ${releaseChannels} c
+        where c.release_id = ${releaseCatalog.id} and lower(trim(c.source_key)) = 'sibna')
+      and not exists (select 1 from ${releaseChannels} c
+        where c.release_id = ${releaseCatalog.id} and lower(trim(c.source_key)) != 'sibna')`);
+}
+
 async function backfillLegacyReleases(db: CollectionDb): Promise<void> {
   let rows: LegacyReleaseRow[];
   try {
@@ -702,6 +722,7 @@ async function backfillLegacyReleases(db: CollectionDb): Promise<void> {
 
   for (const row of rows) {
     const release = legacyReleaseToCollected(row, collectedAt);
+    if (isRetiredReleaseChannel(release)) continue;
     const releaseId = `legacy:${row.id}`;
     queries.push(
       db
@@ -948,6 +969,7 @@ async function planCachedScheduleConflicts(
       .where(inArray(releaseCatalog.canonicalKey, canonicalKeyChunk));
     for (const row of rows) {
       const releaseDate = row.channelReleaseDate ?? row.catalogReleaseDate;
+      if (isRetiredReleaseChannel({sourceKey:row.channelSourceKey,sourceUrl:row.channelSourceUrl,productUrl:row.channelProductUrl})) continue;
       if (
         !releaseDate ||
         !isReleaseCategory(row.category) ||
@@ -1089,7 +1111,7 @@ async function planGroupWrites(
     );
   }
   for (const idChunk of chunksOf(
-    identityCatalogIds,
+    [...new Set([...identityCatalogIds,...canonicalKeys.map(catalogId)])],
     D1_MAX_BOUND_PARAMETERS,
   )) {
     addCatalogRows(
@@ -1613,6 +1635,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
 
     async listCachedReleases() {
       const db = await provider();
+      await retireReferenceCatalogKeys(db);
       await backfillLegacyReleases(db);
       const rows = await db
         .select({
@@ -1652,6 +1675,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
 
       const releases = new Map<string, CachedRelease>();
       for (const row of rows) {
+        if (isRetiredReleaseChannel({sourceKey:row.channelSourceKey,sourceUrl:row.channelSourceUrl,productUrl:row.channelProductUrl})) continue;
         if (
           !isReleaseCategory(row.category) ||
           !isReleaseKind(row.releaseKind) ||
@@ -1691,7 +1715,9 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
     },
 
     async persistSourceResult(result) {
+      if (isRetiredReleaseSource(result.sourceKey) || result.groups.some(group=>group.channels.some(isRetiredReleaseChannel))) return {reviewItemsCreated:0};
       const db = await provider();
+      await retireReferenceCatalogKeys(db);
       const token = await claimSourceResult(db, result);
       if (!token) return { reviewItemsCreated: 0 };
       const writeGuard = sourceClaimGuard(result.sourceKey, token);
@@ -1881,7 +1907,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
         .from(releaseSources)
         .orderBy(asc(releaseSources.sourceKey));
       return rows.flatMap((row) =>
-        isSourceStatus(row.status)
+        isSourceStatus(row.status) && !isRetiredReleaseSource(row.sourceKey)
           ? [
               {
                 sourceKey: row.sourceKey,
@@ -1908,7 +1934,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
         .where(eq(reviewItems.status, "pending"))
         .orderBy(desc(reviewItems.createdAt), desc(reviewItems.id));
       return rows.flatMap((row) =>
-        isReviewReason(row.reason) && isReviewStatus(row.status)
+        isReviewReason(row.reason) && isReviewStatus(row.status) && !isRetiredReleaseSource(row.sourceKey)
           ? [
               {
                 id: row.id,
@@ -1928,7 +1954,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
       const row = await db
         .select({ count: sql<number>`count(*)` })
         .from(reviewItems)
-        .where(eq(reviewItems.status, "pending"))
+        .where(and(eq(reviewItems.status, "pending"),sql`lower(trim(${reviewItems.sourceKey})) != 'sibna'`))
         .get();
       return Number(row?.count ?? 0);
     },
@@ -1948,11 +1974,12 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
         .where(and(
           eq(reviewItems.reason, "missing_date"),
           eq(reviewItems.status, "pending"),
+          sql`lower(trim(${reviewItems.sourceKey})) != 'sibna'`,
         ))
         .orderBy(desc(reviewItems.createdAt), desc(reviewItems.id))
         .limit(200);
       return rows.flatMap((row) =>
-        isReviewReason(row.reason) && isReviewStatus(row.status)
+        isReviewReason(row.reason) && isReviewStatus(row.status) && !isRetiredReleaseSource(row.sourceKey)
           ? [{ id: row.id, sourceKey: row.sourceKey, externalId: row.externalId,
               reason: row.reason, payloadJson: row.payloadJson, status: row.status }]
           : [],
@@ -2151,6 +2178,7 @@ function createRepository(provider: CollectionDbProvider): CollectionRepository 
         }
 
         const group = parseReviewPayload(item.payloadJson);
+        if (isRetiredReleaseSource(item.sourceKey) || group.channels.some(isRetiredReleaseChannel)) throw new ReviewResolutionError("invalid_payload");
         if (input.action === "merge") {
           const target = await db
             .select({ id: releaseCatalog.id })

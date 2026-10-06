@@ -1,5 +1,6 @@
 export type SourceTier = "first_party" | "aggregator" | "announcement";
 import { expandedSourceCatalog } from "../expanded-sources.ts";
+import {isRetiredReleaseSource} from "./source-policy.ts";
 
 const AGGREGATOR_SOURCES = new Set([
   "shoeprize",
@@ -10,7 +11,6 @@ const AGGREGATOR_SOURCES = new Set([
   "kasina",
   "kream",
   "tune",
-  "sibna",
 ]);
 
 export function sourceTier(sourceKey: string): SourceTier {
@@ -21,6 +21,7 @@ export function sourceTier(sourceKey: string): SourceTier {
 }
 
 export function sourceTierRank(sourceKey: string): number {
+  if (isRetiredReleaseSource(sourceKey)) return 0;
   return { announcement: 1, aggregator: 2, first_party: 3 }[
     sourceTier(sourceKey)
   ];

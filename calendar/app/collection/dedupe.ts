@@ -81,15 +81,25 @@ function titleTokens(title: string): Set<string> {
   );
 }
 
-function hasSimilarTitle(left: CollectedRelease, right: CollectedRelease): boolean {
-  // Separate authored posts describe distinct retailer, color or market schedules.
-  // Their validated numeric identities are stronger evidence than title overlap.
-  if (
-    left.sourceKey === "sibna" && right.sourceKey === "sibna" &&
-    /^sibna:\d+$/.test(left.externalId) && /^sibna:\d+$/.test(right.externalId) &&
-    left.externalId !== right.externalId
-  ) return false;
+function officialPokemonProductId(release: CollectedRelease): string | null {
+  if (release.sourceKey !== "pokemonCard") return null;
+  const id = release.externalId.match(/^pokemon:(\d+)$/)?.[1];
+  if (!id) return null;
+  for (const value of [release.sourceUrl, release.productUrl]) {
+    try {
+      const url = new URL(value ?? "");
+      if (url.protocol !== "https:" || url.host !== "pokemoncard.co.kr" ||
+          url.username || url.password || url.pathname !== `/card/${id}`) return null;
+    } catch { return null; }
+  }
+  return id;
+}
 
+function hasSimilarTitle(left: CollectedRelease, right: CollectedRelease): boolean {
+  const leftProductId = officialPokemonProductId(left);
+  const rightProductId = officialPokemonProductId(right);
+  // The official catalog identifies separate variants even when their titles share most words.
+  if (leftProductId && rightProductId && leftProductId !== rightProductId) return false;
   if (
     normalizedStyleCode(left.styleCode) ||
     normalizedStyleCode(right.styleCode) ||

@@ -8,7 +8,7 @@ import { fetchTuneReleases } from "../tune.ts";
 import { expandedReleaseSourceAdapters } from "./expanded-adapters.ts";
 import { instagramReleaseAdapter } from "./instagram-adapter.ts";
 import { instagramPublicReleaseAdapter } from "./instagram-widget-adapter.ts";
-import { sibnaReleaseAdapter, createSibnaCalendarAdapter, sibnaCalendarWindow, isSibnaCalendarMonth } from "./sibna-adapter.ts";
+import {officialProductAdapters} from "./official-product-adapters.ts";
 import {
   sourceEnabled,
   type ReleaseSourceKey,
@@ -57,8 +57,9 @@ const newReleaseSourceAdapters: ReleaseSourceAdapter[] = [
 
 export function enabledReleaseSourceAdapters(): ReleaseSourceAdapter[] {
   return [...existingReleaseSourceAdapters, ...newReleaseSourceAdapters,
-    ...expandedReleaseSourceAdapters.filter(({ key }) => key !== "sibna"),
-    sibnaReleaseAdapter, instagramReleaseAdapter, instagramPublicReleaseAdapter].filter(
+    ...expandedReleaseSourceAdapters.filter(adapter=>!officialProductAdapters.some(item=>item.key===adapter.key)),
+    ...officialProductAdapters,
+    instagramReleaseAdapter, instagramPublicReleaseAdapter].filter(
     (adapter) => sourceEnabled(adapter.key as ReleaseSourceKey),
   );
 }
@@ -69,21 +70,9 @@ export function configuredReleaseSourceKeys(): string[] {
   return enabledReleaseSourceAdapters().map(({ key }) => key);
 }
 
-/** Monthly backfill stays separate from the live source and never becomes a new retailer. */
-export function scheduledReleaseSourceAdapters(now: Date, requestedMonth?: string): ReleaseSourceAdapter[] {
-  const adapters = enabledReleaseSourceAdapters();
-  if (!adapters.some(({ key }) => key === "sibna")) return adapters;
-  const months = sibnaCalendarWindow(now);
-  if (requestedMonth && isSibnaCalendarMonth(requestedMonth)) {
-    const index = months.indexOf(requestedMonth);
-    if (index >= 0) months.splice(index, 1);
-    months.unshift(requestedMonth);
-  }
-  return [...adapters, ...months.map((month) => ({
-    ...createSibnaCalendarAdapter(month),
-    collectionKey: `sibna:calendar:${month}`,
-    refreshInterval: "weekly" as const,
-  }))];
+/** All production schedules come from enabled source adapters. */
+export function scheduledReleaseSourceAdapters(_now: Date, _requestedMonth?: string): ReleaseSourceAdapter[] {
+  return enabledReleaseSourceAdapters();
 }
 
 export function findReleaseSourceAdapter(

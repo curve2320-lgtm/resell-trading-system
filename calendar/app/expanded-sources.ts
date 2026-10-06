@@ -6,14 +6,16 @@ export type ExpandedSource = {
   feedUrl?: string;
   domains: string[];
   region: string;
-  parser: "atmos" | "end" | "slamjam" | "atom" | "structured" | "sibna";
+  parser: "atmos" | "end" | "slamjam" | "atom" | "structured";
   category: "sneakers" | "fashion" | "lifestyle";
 };
 
 export const expandedSourceCatalog: ExpandedSource[] = [
   {key:"lego",label:"LEGO 한정·협업",url:"https://www.lego.com/en-us/aboutus/newsroom",domains:["lego.com"],region:"글로벌",parser:"structured",category:"lifestyle"},
   {key:"starbucks",label:"스타벅스 한정 MD",url:"https://www.starbucks.co.kr/whats_new/news_list.do?cate=N01",domains:["starbucks.co.kr"],region:"한국",parser:"structured",category:"lifestyle"},
-  {key:"museumShop",label:"뮷즈·국립박물관",url:"https://www.museumshop.or.kr/kor/boad/notice/list.do",domains:["museumshop.or.kr"],region:"한국",parser:"structured",category:"lifestyle"},
+  {key:"museumShop",label:"뮷즈 공식몰",url:"https://www.museumshop.or.kr/kor/product/product_li.do?str_bcode=003000000",domains:["museumshop.or.kr"],region:"한국",parser:"structured",category:"lifestyle"},
+  {key:"onepieceCard",label:"원피스 카드 공식 제품정보",url:"https://onepiece-cardgame.kr/products.do",domains:["onepiece-cardgame.kr"],region:"한국",parser:"structured",category:"lifestyle"},
+  {key:"pokemonCard",label:"포켓몬 카드 공식 제품정보",url:"https://pokemoncard.co.kr/card/category/info1",domains:["pokemoncard.co.kr"],region:"한국",parser:"structured",category:"lifestyle"},
   {key:"pokemonStore",label:"포켓몬·TCG",url:"https://www.pokemonstore.co.kr/pages/board/post-list.html?boardId=information",domains:["pokemonstore.co.kr"],region:"한국",parser:"structured",category:"lifestyle"},
   {key:"lineFriends",label:"LINE FRIENDS 공식 굿즈",url:"https://linefriends.com/ko-kr/news",domains:["linefriends.com"],region:"한국",parser:"structured",category:"lifestyle"},
   {key:"atmosJP",label:"atmos 일본",url:"https://launch.atmos-tokyo.com/launch",domains:["atmos-tokyo.com"],region:"일본",parser:"atmos",category:"sneakers"},
@@ -40,7 +42,6 @@ export const expandedSourceCatalog: ExpandedSource[] = [
   {key:"patta",label:"Patta 공식 공지",url:"https://patta.nl/blogs/news",feedUrl:"https://patta.nl/blogs/news.atom",domains:["patta.nl"],region:"네덜란드",parser:"atom",category:"fashion"},
   {key:"dsm",label:"Dover Street Market",url:"https://london.doverstreetmarket.com/pages/new-items",domains:["doverstreetmarket.com"],region:"영국",parser:"structured",category:"fashion"},
   {key:"worksoutGlobal",label:"WORKSOUT 글로벌 공지",url:"https://worksout.com/blogs/news",feedUrl:"https://worksout.com/blogs/news.atom",domains:["worksout.com"],region:"해외",parser:"atom",category:"fashion"},
-  {key:"sibna",label:"SIBNA 발매 정보",url:"https://sibna.kr/today/upcoming",domains:["sibna.kr"],region:"한국",parser:"sibna",category:"lifestyle"},
 ];
 
 export const expandedSourceDomains = [...new Set(expandedSourceCatalog.flatMap(({domains}) => domains))];

@@ -248,50 +248,6 @@ test("does not conflict clearly different raffle or offline release stages", () 
   );
 });
 
-test("distinct authored SIBNA posts retain actual color, retailer and country variants", () => {
-  const pairs = [
-    [1982, "노아 X 타이맥스 문 페이즈 워치 브라운 골드 NOAH X TIMEX MOON PHASE WATCH BROWN/GOLD"],
-    [1981, "노아 X 타이맥스 문 페이즈 워치 브라운 스틸 NOAH X TIMEX MOON PHASE WATCH BROWN/STEEL"],
-    [2004, "에어 조던 4 x J Balvin Amazonas"],
-    [2023, "에어 조던 4 x J Balvin Amazonas 289,000 원"],
-    [1960, "팔라스 2026 겨울 1주차 드롭 (미국)"],
-    [1959, "팔라스 2026 겨울 1주차 드롭 (영국, 유럽)"],
-    [1967, "나이키코리아) 나이키 마인드 001"],
-    [1940, "무신사) 나이키 마인드 001"],
-  ] as const;
-  const rows = pairs.map(([id, title]) => ({
-    ...baseRelease, sourceKey: "sibna", externalId: `sibna:${id}`, title, brand: null,
-    releaseDate: "2026-10-02", retailer: "SIBNA 발매정보",
-    productUrl: `https://sibna.kr/today/post/${id}-${encodeURIComponent(title)}`,
-    sourceUrl: `https://sibna.kr/today/post/${id}-${encodeURIComponent(title)}`,
-  }));
-  const groups = groupCollectedReleases(rows);
-  assert.equal(groups.length, rows.length);
-  assert.equal(groups.every(({ reviewReason }) => reviewReason === null), true);
-  assert.deepEqual(new Set(groups.flatMap(({ channels }) => channels.map(({ externalId }) => externalId))), new Set(rows.map(({ externalId }) => externalId)));
-});
-
-test("SIBNA posting exception preserves cross-source fuzzy review and style-code grouping", () => {
-  const sibna = { ...baseRelease, sourceKey: "sibna", externalId: "sibna:2004", title: "Air Example Retro", brand: null };
-  const anotherSource = { ...sibna, sourceKey: "retailer", externalId: "retailer:1", title: "Air Example Retro Premium" };
-  assert.deepEqual(groupCollectedReleases([sibna, anotherSource]).map(({ reviewReason }) => reviewReason), ["possible_duplicate", "possible_duplicate"]);
-  const styled = { ...sibna, styleCode: "IQ5495-005" };
-  const anotherPost = { ...styled, externalId: "sibna:2023", title: "Air Example Retro Premium" };
-  const grouped = groupCollectedReleases([styled, anotherPost]);
-  assert.equal(grouped.length, 1);
-  assert.equal(grouped[0].channels.length, 2);
-  assert.equal(grouped[0].reviewReason, null);
-  assert.equal(groupCollectedReleases([styled, { ...anotherSource, styleCode: styled.styleCode, releaseDate: "2026-08-02" }]).some(({ reviewReason }) => reviewReason === "conflicting_schedule"), true);
-});
-
-test("SIBNA fuzzy exemption requires distinct numeric posting identities", () => {
-  const first = { ...baseRelease, sourceKey: "sibna", externalId: "sibna:2004", title: "Air Example Retro" };
-  for (const externalId of ["sibna:2004", "not-a-post", "sibna:not-a-number"]) {
-    const second = { ...first, externalId, title: "Air Example Retro Premium" };
-    assert.deepEqual(groupCollectedReleases([first, second]).map(({ reviewReason }) => reviewReason), ["possible_duplicate", "possible_duplicate"]);
-  }
-});
-
 test("routes fuzzy titles without style codes to review without merging them", () => {
   const original = { ...baseRelease, title: "Air Example Retro" };
   const similar = {

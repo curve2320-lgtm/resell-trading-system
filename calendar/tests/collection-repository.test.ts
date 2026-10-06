@@ -55,26 +55,59 @@ const baseRelease: CollectedRelease = {
   collectedAt,
 };
 
-test("source refresh leases serialize different month jobs and release only their own token", async () => {
-  const repository=productionRepository(new SQLiteD1());
-  assert.equal(await repository.claimSourceRefreshLock!("sibna",t0,"first",collectedAt),true);
-  assert.equal(await repository.claimSourceRefreshLock!("sibna",t1,"second",collectedAt),false);
-  await repository.releaseSourceRefreshLock!("sibna","second");
-  assert.equal(await repository.claimSourceRefreshLock!("sibna",t1,"third",collectedAt),false);
-  await repository.releaseSourceRefreshLock!("sibna","first");
-  assert.equal(await repository.claimSourceRefreshLock!("sibna",t1,"second",collectedAt),true);
-  assert.equal(await repository.claimSourceRefreshLock!("sibna",t5,"recovered",t1),true);
-  await repository.releaseSourceRefreshLock!("sibna","second");
-  assert.equal(await repository.claimSourceRefreshLock!("sibna",t5,"fourth",t1),false);
+test("persisted retired cache stays hidden while a genuine mixed channel survives", async()=>{
+  const d1=new SQLiteD1(),repo=productionRepository(d1);
+  await repo.persistSourceResult(sourceResult({groups:[releaseGroup({...baseRelease,sourceKey:"old-source"})],sourceKey:"old-source"}));
+  d1.execute("update release_channels set source_key='sibna', source_url='https://sibna.kr/today/post/1', product_url='https://sibna.kr/today/post/1'");
+  assert.deepEqual(await repo.listCachedReleases(),[]);
+  const direct={...baseRelease,sourceKey:"nike",externalId:"nike:direct",sourceUrl:"https://www.nike.com/kr/launch/t/product",productUrl:"https://www.nike.com/kr/launch/t/product"};
+  await repo.persistSourceResult(sourceResult({groups:[releaseGroup(direct)],sourceKey:"nike",collectedAt:t1}));
+  const rows=await repo.listCachedReleases();assert.equal(rows.length,1);assert.deepEqual(rows[0].channels.map(c=>c.sourceKey),["nike"]);
+  assert.equal((await repo.listReviewItems()).length,0);
+  assert.equal(d1.rows("select * from release_channels where source_key='sibna'").length,1);
 });
 
-test("an empty historic month keeps cached SIBNA schedules and aggregate source count", async () => {
+test("retired jobs cannot republish and old review approvals cannot restore removed schedules",async()=>{
+  const d1=new SQLiteD1(),repo=productionRepository(d1),release={...baseRelease,sourceKey:"sibna",sourceUrl:"https://sibna.kr/today/post/1"};
+  await repo.persistSourceResult(sourceResult({sourceKey:"sibna",groups:[releaseGroup(release)]}));assert.deepEqual(await repo.listCachedReleases(),[]);
+  d1.execute("insert into review_items (source_key,external_id,reason,payload_json,status,created_at) values (?,?,?,?,?,?)","sibna",release.externalId,"missing_date",JSON.stringify(releaseGroup(release)),"pending",collectedAt);
+  const id=Number(d1.rows<{id:number}>("select id from review_items")[0].id);
+  assert.deepEqual(await repo.listReviewItems(),[]);assert.equal(await repo.countPendingReviewItems(),0);
+  await assert.rejects(repo.resolveReview({id,action:"approve",resolvedBy:"admin"}),error=>error instanceof ReviewResolutionError&&error.code==="invalid_payload");
+  assert.deepEqual(await repo.listCachedReleases(),[]);
+});
+
+test("a hidden retired catalog cannot block an existing official identity when its SKU becomes known",async()=>{
+  const d1=new SQLiteD1(),repo=productionRepository(d1);
+  const hidden={...baseRelease,sourceKey:"old-source",externalId:"old",styleCode:"NEW-123"};
+  await repo.persistSourceResult(sourceResult({sourceKey:"old-source",groups:[releaseGroup(hidden)]}));
+  d1.execute("update release_channels set source_key='sibna' where source_key='old-source'");
+  const direct={...baseRelease,sourceKey:"nike",externalId:"nike:identity",styleCode:null,sourceUrl:"https://www.nike.com/kr/launch/t/direct",productUrl:"https://www.nike.com/kr/launch/t/direct"};
+  await repo.persistSourceResult(sourceResult({sourceKey:"nike",groups:groupCollectedReleases([direct]),collectedAt:t1}));
+  const before=(await repo.listCachedReleases())[0].id;
+  await repo.persistSourceResult(sourceResult({sourceKey:"nike",groups:groupCollectedReleases([{...direct,styleCode:"NEW-123"}]),collectedAt:t5}));
+  const after=await repo.listCachedReleases();assert.equal(after.length,1);assert.equal(after[0].id,before);assert.equal(after[0].canonicalKey.includes('new123'),true);assert.deepEqual(await repo.listReviewItems(),[]);
+  assert.equal(d1.rows<{count:number}>("select count(*) as count from release_catalog where status='retired'")[0].count,1);
+});
+
+test("retired undated reviews cannot fill the limit ahead of a genuine older announcement",async()=>{
+  const d1=new SQLiteD1(),repo=productionRepository(d1);
+  for(let i=0;i<205;i++)d1.execute("insert into review_items (source_key,external_id,reason,payload_json,status,created_at) values (?,?,?,?,?,?)","sibna",String(i),"missing_date","{}","pending",t5);
+  d1.execute("insert into review_items (source_key,external_id,reason,payload_json,status,created_at) values (?,?,?,?,?,?)","nike","old-notice","missing_date","{}","pending",t1);
+  const reviews=await repo.listPendingUndatedReviews!();assert.equal(reviews.length,1);assert.equal(reviews[0].sourceKey,'nike');
+});
+
+test("source refresh leases serialize different month jobs and release only their own token", async () => {
   const repository=productionRepository(new SQLiteD1());
-  const release={...baseRelease,sourceKey:"sibna",externalId:"sibna:1234"};
-  await repository.persistSourceResult(sourceResult({sourceKey:"sibna",groups:[releaseGroup(release)],authoritativeSnapshot:false}));
-  await repository.persistSourceResult(sourceResult({sourceKey:"sibna",groups:[],collectedAt:t1,confirmedEmpty:true,authoritativeSnapshot:false}));
-  const data=await readReleaseApiPayload(repository,["sibna"]);
-  assert.equal(data.sources.sibna.count,1);assert.equal(data.releases.length,1);
+  assert.equal(await repository.claimSourceRefreshLock!("officialCalendar",t0,"first",collectedAt),true);
+  assert.equal(await repository.claimSourceRefreshLock!("officialCalendar",t1,"second",collectedAt),false);
+  await repository.releaseSourceRefreshLock!("officialCalendar","second");
+  assert.equal(await repository.claimSourceRefreshLock!("officialCalendar",t1,"third",collectedAt),false);
+  await repository.releaseSourceRefreshLock!("officialCalendar","first");
+  assert.equal(await repository.claimSourceRefreshLock!("officialCalendar",t1,"second",collectedAt),true);
+  assert.equal(await repository.claimSourceRefreshLock!("officialCalendar",t5,"recovered",t1),true);
+  await repository.releaseSourceRefreshLock!("officialCalendar","second");
+  assert.equal(await repository.claimSourceRefreshLock!("officialCalendar",t5,"fourth",t1),false);
 });
 
 test("failed backfill can retry after its cooldown without changing ordinary terminal slots", async () => {
@@ -125,23 +158,23 @@ test("public API preserves schedule details, note and original method on every c
 test("cached public API retains explicit first-come lifestyle periods while information stays information", async () => {
   const repository = productionRepository(new SQLiteD1());
   const emart: CollectedRelease = {
-    ...baseRelease, sourceKey:"sibna", externalId:"sibna:2022",
+    ...baseRelease, sourceKey:"museumShop", externalId:"museumShop:2022",
     title:"이마트24 포켓몬 30주년 카드 입고", brand:null, category:"lifestyle", styleCode:null,
     releaseDate:"2026-10-03", releaseTime:null, releaseMethod:"선착순",
     startAt:"2026-10-03", endAt:"2026-10-05", startTimeUnknown:true, endTimeUnknown:true,
-    retailer:"SIBNA 발매정보", productUrl:"https://sibna.kr/today/post/2022-emart-pokemon",
-    sourceUrl:"https://sibna.kr/today/post/2022-emart-pokemon",
+    retailer:"뮷즈 공식몰", productUrl:"https://www.museumshop.or.kr/kor/product/product_view.do?str_goodcode=202607210006",
+    sourceUrl:"https://www.museumshop.or.kr/kor/product/product_view.do?str_goodcode=202607210006",
   };
-  const information = {...emart, externalId:"sibna:1939",title:"DOSSY with 복심이",releaseMethod:"정보"};
-  const fashion = {...emart,externalId:"sibna:3000",title:"Fashion capsule",category:"fashion" as const,releaseMethod:"first-come-first-served"};
-  const genericFashion = {...fashion,externalId:"sibna:3001",title:"Fashion announcement",releaseMethod:null};
-  const raffle = {...emart,externalId:"sibna:1888",title:"Pokémon raffle",releaseKind:"raffle" as const};
-  await repository.persistSourceResult(sourceResult({sourceKey:"sibna",groups:groupCollectedReleases([emart,information,fashion,genericFashion,raffle])}));
+  const information = {...emart, externalId:"museumShop:1939",title:"DOSSY with 복심이",releaseMethod:"정보"};
+  const fashion = {...emart,externalId:"museumShop:3000",title:"Fashion capsule",category:"fashion" as const,releaseMethod:"first-come-first-served"};
+  const genericFashion = {...fashion,externalId:"museumShop:3001",title:"Fashion announcement",releaseMethod:null};
+  const raffle = {...emart,externalId:"museumShop:1888",title:"Pokémon raffle",releaseKind:"raffle" as const};
+  await repository.persistSourceResult(sourceResult({sourceKey:"museumShop",groups:groupCollectedReleases([emart,information,fashion,genericFashion,raffle])}));
   const cached = (await repository.listCachedReleases()).find(item=>item.title===emart.title)!;
   assert.equal(cached.channels[0].releaseMethod,"선착순");
   assert.equal(cached.channels[0].endAt,"2026-10-05");
   assert.equal(cached.channels[0].endTimeUnknown,true);
-  const published = (await readReleaseApiPayload(repository,["sibna"])).releases;
+  const published = (await readReleaseApiPayload(repository,["museumShop"])).releases;
   const sale = published.find(item=>item.title===emart.title)!;
   assert.equal(sale.category,"선착순");
   assert.equal(sale.catalogCategory,"lifestyle");
